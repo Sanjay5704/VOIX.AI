@@ -1,0 +1,19 @@
+# CPU-only override. Use alongside the base compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+#
+# Removes the GPU device reservation and builds the backend from the slim
+# Python base image instead of the CUDA base image.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: python:3.11-slim
+    environment:
+      - DEVICE_PREFERENCE=cpu
+    deploy:
+      resources:
+        reservations:
+          devices: []

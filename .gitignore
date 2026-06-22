@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# --- Node / React ---
+node_modules/
+dist/
+.vite/
+
+# --- Environment ---
+.env
+*.env.local
+
+# --- Runtime data (generated at runtime, not source) ---
+backend/outputs/*
+!backend/outputs/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
+backend/model_cache/*
+!backend/model_cache/.gitkeep
+backend/voices/custom/*
+!backend/voices/custom/.gitkeep
+backend/voices/voice_registry.json
+backend/voices/*.wav
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- IDE ---
+.vscode/
+.idea/

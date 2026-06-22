@@ -1,0 +1,33 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+
+# --- TTS Engine: Coqui XTTS-v2 (state-of-the-art open-source multilingual,
+# voice-cloning capable TTS model) ---
+TTS==0.22.0
+torch==2.4.1
+torchaudio==2.4.1
+
+# --- Audio processing ---
+soundfile==0.12.1
+pydub==0.25.1
+numpy==1.26.4
+librosa==0.10.2.post1
+
+# --- Bootstrap placeholder voice generation (fallback only; replace with
+# real recordings for production quality, see docs/INSTALL.md) ---
+pyttsx3==2.98
+
+# --- Utilities ---
+python-dotenv==1.0.1
+aiofiles==24.1.0
+
+# --- Logging / observability ---
+python-json-logger==3.2.1
+
+# --- Testing ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

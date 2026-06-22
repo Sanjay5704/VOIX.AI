@@ -1,0 +1,64 @@
+# Full-stack deployment: FastAPI/XTTS backend + Nginx-served React frontend.
+#
+# GPU usage (default — requires NVIDIA Container Toolkit on the host):
+#   docker compose up --build
+#
+# CPU-only usage:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+#
+# Backend reachable directly at http://localhost:8000 (docs at /docs).
+# Frontend reachable at http://localhost:3000, proxying /api to backend.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: xtts-backend:latest
+    container_name: xtts-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    volumes:
+      - voices_data:/app/voices
+      - outputs_data:/app/outputs
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+      - model_cache:/app/model_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    image: xtts-frontend:latest
+    container_name: xtts-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  voices_data:
+  outputs_data:
+  uploads_data:
+  logs_data:
+  model_cache:
