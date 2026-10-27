@@ -1,0 +1,14 @@
+line-length = 110
+target-version = "py311"
+extend-exclude = ["env", "frontend", "backend"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic
+
+[lint.isort]
+known-first-party = ["voix_api", "voix_worker"]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["E501"]
+"tests_e2e/**" = ["E501"]
