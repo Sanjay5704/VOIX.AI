@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List
 
 # XTTS-v2 degrades in quality / can clip audio past ~250 characters per
 # inference call. We chunk on sentence boundaries first, then hard-wrap
@@ -68,7 +67,7 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
-def split_sentences(text: str) -> List[str]:
+def split_sentences(text: str) -> list[str]:
     """Split normalized text into sentences on terminal punctuation."""
     text = normalize_text(text)
     if not text:
@@ -76,7 +75,7 @@ def split_sentences(text: str) -> List[str]:
 
     # Split on paragraph breaks first to preserve intentional long pauses
     paragraphs = [p.strip() for p in re.split(r"\n+", text) if p.strip()]
-    sentences: List[str] = []
+    sentences: list[str] = []
 
     for para in paragraphs:
         parts = _SENTENCE_END_RE.split(para)
@@ -88,13 +87,13 @@ def split_sentences(text: str) -> List[str]:
     return sentences
 
 
-def chunk_sentence(sentence: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]:
+def chunk_sentence(sentence: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
     """If a single sentence exceeds max_chars, split it on clause boundaries."""
     if len(sentence) <= max_chars:
         return [sentence]
 
     clauses = _CLAUSE_SPLIT_RE.split(sentence)
-    chunks: List[str] = []
+    chunks: list[str] = []
     current = ""
 
     for clause in clauses:
@@ -125,10 +124,10 @@ def chunk_sentence(sentence: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]
     return chunks
 
 
-def prepare_chunks(text: str) -> List[TextChunk]:
+def prepare_chunks(text: str) -> list[TextChunk]:
     """Full pipeline: normalize -> split sentences -> sub-chunk long ones."""
     sentences = split_sentences(text)
-    chunks: List[str] = []
+    chunks: list[str] = []
     for sentence in sentences:
         chunks.extend(chunk_sentence(sentence))
 

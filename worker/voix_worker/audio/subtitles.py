@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 
 @dataclass(frozen=True)
@@ -16,9 +15,11 @@ class SentenceTimestamp:
     start: float
     end: float
 
-    def scaled(self, speed: float) -> "SentenceTimestamp":
+    def scaled(self, speed: float) -> SentenceTimestamp:
         """Timestamps after an atempo speed change of `speed`."""
-        return SentenceTimestamp(self.index, self.text, round(self.start / speed, 3), round(self.end / speed, 3))
+        return SentenceTimestamp(
+            self.index, self.text, round(self.start / speed, 3), round(self.end / speed, 3)
+        )
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -34,7 +35,7 @@ def _format_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def generate_srt(sentences: List[SentenceTimestamp]) -> str:
+def generate_srt(sentences: list[SentenceTimestamp]) -> str:
     """Build SRT-formatted subtitle text from sentence timestamps."""
     lines = []
     for s in sentences:
@@ -45,7 +46,8 @@ def generate_srt(sentences: List[SentenceTimestamp]) -> str:
     return "\n".join(lines)
 
 
-def write_srt(sentences: List[SentenceTimestamp], output_path: Path) -> Path:
+def write_srt(sentences: list[SentenceTimestamp], output_path: Path) -> Path:
     content = generate_srt(sentences)
-    output_path.write_text(content, encoding="utf-8")
+    # newline="" keeps output byte-identical whether the worker runs on Windows or Linux
+    output_path.write_text(content, encoding="utf-8", newline="")
     return output_path
