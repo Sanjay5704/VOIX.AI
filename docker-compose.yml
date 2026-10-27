@@ -1,64 +1,72 @@
-# Full-stack deployment: FastAPI/XTTS backend + Nginx-served React frontend.
+# Local development stack.
 #
-# GPU usage (default — requires NVIDIA Container Toolkit on the host):
-#   docker compose up --build
+#   docker compose up -d postgres            # just the database (for native API/worker + tests)
+#   docker compose up --build                # postgres + api + web
+#   docker compose --profile worker up       # + a CPU mock worker (no GPU needed)
 #
-# CPU-only usage:
-#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+# The real GPU worker runs natively on Windows:  see docs/RUNNING.md
 #
-# Backend reachable directly at http://localhost:8000 (docs at /docs).
-# Frontend reachable at http://localhost:3000, proxying /api to backend.
+# Postgres is published on 5433 to avoid clashing with a local install on 5432.
 
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    image: xtts-backend:latest
-    container_name: xtts-backend
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: voix
+      POSTGRES_PASSWORD: voix
+      POSTGRES_DB: voix
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voix -d voix"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: dev
+      DATABASE_URL: postgresql+psycopg://voix:voix@postgres:5432/voix
+      LOCAL_STORAGE_DIR: /app/data/storage
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-insecure-worker-token}
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-jwt-secret-change-me}
+      ENABLED_ENGINES: ${ENABLED_ENGINES:-kokoro,xtts,mock}
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     ports:
       - "8000:8000"
-    env_file:
-      - path: ./backend/.env
-        required: false
     volumes:
-      - voices_data:/app/voices
-      - outputs_data:/app/outputs
-      - uploads_data:/app/uploads
-      - logs_data:/app/logs
-      - model_cache:/app/model_cache
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
+      - storage:/app/data/storage
 
-  frontend:
+  web:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ""
-    image: xtts-frontend:latest
-    container_name: xtts-frontend
-    restart: unless-stopped
+        VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
     ports:
       - "3000:80"
+
+  worker:
+    profiles: ["worker"]
+    build: ./worker
     depends_on:
-      - backend
+      - api
+    environment:
+      API_URL: http://api:8000
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-insecure-worker-token}
+      WORKER_NAME: docker-mock-worker
+      ENGINES: mock
 
 volumes:
-  voices_data:
-  outputs_data:
-  uploads_data:
-  logs_data:
-  model_cache:
+  pgdata:
+  storage:
