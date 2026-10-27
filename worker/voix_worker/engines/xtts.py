@@ -1,178 +1,147 @@
 """
-TTS engine: wraps Coqui XTTS-v2 (state-of-the-art open-source multilingual,
-voice-cloning capable TTS model) behind a clean synthesis API.
+Coqui XTTS-v2 engine: multilingual, zero-shot voice cloning.
+
+LICENCE: XTTS-v2 weights are under the Coqui Public Model License
+(non-commercial). Coqui has shut down, so no commercial licence can be
+bought. VOIX keeps XTTS for cloning demos and defaults to Kokoro.
 
 Design notes:
-  * The model is loaded once (lazy, on first use) and cached as a singleton,
-    since loading XTTS-v2 takes several seconds to tens of seconds.
-  * Synthesis happens per-sentence (see utils.text_processing) rather than
-    on the whole text blob. This (a) gives us per-sentence timestamps for
-    subtitles, (b) lets us insert punctuation-aware pauses between
-    sentences for natural cadence, and (c) avoids XTTS quality
-    degradation/clipping on long inputs.
-  * Speed and pitch are applied as a post-process via ffmpeg (see
-    utils.audio_processing) rather than only through XTTS's own `speed`
-    param, giving independent control over both.
-  * `emotion_exaggeration` scales the reference-conditioning temperature
-    and speaking-rate variance slightly to push delivery from flat/neutral
-    toward more expressive, without a separate emotion-control model.
+  * The model is loaded once (lazily, on first job) since loading takes
+    several seconds to tens of seconds.
+  * Speaker conditioning (GPT latents + speaker embedding) is computed once
+    per voice and cached, instead of on every chunk as `TTS.tts(speaker_wav=...)`
+    does. Long scripts are dozens of chunks, so this is a large saving.
+  * Synthesis stays per-chunk (see audio.text_processing): XTTS degrades past
+    ~250 characters per call, and per-chunk output gives subtitle timestamps.
+  * `expressiveness` scales the sampling temperature, pushing delivery from
+    flat toward more expressive without a separate emotion model.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
-from pathlib import Path
-from typing import List, Optional
+from collections import OrderedDict
+from typing import Any
 
 import numpy as np
 
-from app.core.config import get_settings
-from app.core.exceptions import GenerationError, ModelLoadError
-from app.core.logging_config import get_logger
-from app.models.schemas import SentenceTimestamp
-from app.services.device_manager import DeviceInfo, detect_device
-from app.utils.audio_processing import pause_for_punctuation
-from app.utils.text_processing import prepare_chunks
+from voix_worker.engines.base import Engine, VoiceSpec
+from voix_worker.engines.device import DeviceInfo, detect_device
+from voix_worker.errors import EngineError, InvalidJobError
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
-_engine_lock = threading.Lock()
-_engine_instance: Optional["XTTSEngine"] = None
+SAMPLE_RATE = 24_000
+BASE_TEMPERATURE = 0.65  # XTTS default is ~0.65-0.75
+LATENT_CACHE_SIZE = 16
+LANG_ALIASES = {"en-us": "en", "en-gb": "en", "zh": "zh-cn"}
 
 
-class XTTSEngine:
-    """Singleton wrapper around the Coqui XTTS-v2 model."""
+class XTTSEngine(Engine):
+    id = "xtts"
+    supports_cloning = True
 
-    def __init__(self) -> None:
-        self.settings = get_settings()
-        self.device_info: DeviceInfo = detect_device()
-        self._model = None
+    def __init__(self, model_name: str, device: str = "auto", use_fp16: bool = False) -> None:
+        super().__init__()
+        self.model_name = model_name
+        self.device_info: DeviceInfo = detect_device(device, use_fp16)
+        self._tts: Any = None
         self._load_lock = threading.Lock()
-        self._generation_lock = threading.Semaphore(self.settings.MAX_CONCURRENT_GENERATIONS)
+        self._latents: OrderedDict[str, tuple[Any, Any]] = OrderedDict()
 
-    # ---- Lazy model loading -------------------------------------------------
+    @property
+    def sample_rate(self) -> int:
+        return SAMPLE_RATE
 
     @property
     def is_loaded(self) -> bool:
-        return self._model is not None
+        return self._tts is not None
+
+    @property
+    def _model(self) -> Any:
+        return self._tts.synthesizer.tts_model
 
     def load(self) -> None:
-        if self._model is not None:
+        if self._tts is not None:
             return
         with self._load_lock:
-            if self._model is not None:
+            if self._tts is not None:
                 return
-            logger.info(
-                "Loading XTTS-v2 model '%s' on device=%s ...",
-                self.settings.TTS_MODEL_NAME, self.device_info.device,
-            )
-            start = time.time()
+            os.environ.setdefault("COQUI_TOS_AGREED", "1")  # non-interactive CPML acceptance
+            logger.info("Loading XTTS-v2 '%s' on %s ...", self.model_name, self.device_info.device)
+            start = time.perf_counter()
             try:
-                from TTS.api import TTS  # Coqui TTS
+                from TTS.api import TTS
 
-                model = TTS(self.settings.TTS_MODEL_NAME)
-                model.to(self.device_info.device)
-                self._model = model
+                self._tts = TTS(self.model_name).to(self.device_info.device)
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Failed to load XTTS-v2 model")
-                raise ModelLoadError(
-                    f"Could not load TTS model '{self.settings.TTS_MODEL_NAME}': {exc}"
-                ) from exc
-
-            elapsed = time.time() - start
-            logger.info("XTTS-v2 model loaded in %.1fs", elapsed)
+                raise EngineError(f"Could not load XTTS model '{self.model_name}': {exc}") from exc
+            self.load_ms = int((time.perf_counter() - start) * 1000)
+            logger.info("XTTS-v2 loaded in %.1fs", self.load_ms / 1000)
 
     def unload(self) -> None:
-        """Free GPU memory, e.g. for graceful shutdown."""
-        if self._model is None:
+        if self._tts is None:
             return
-        try:
-            import torch
-            del self._model
-            self._model = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            logger.info("XTTS-v2 model unloaded")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Error unloading model: %s", exc)
+        import torch
 
-    # ---- Synthesis -------------------------------------------------
+        self._tts = None
+        self._latents.clear()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("XTTS-v2 unloaded")
 
-    def synthesize(
-        self,
-        text: str,
-        speaker_wav: Path,
-        language: str = "en",
-        emotion_exaggeration: float = 1.0,
-    ) -> tuple[np.ndarray, int, List[SentenceTimestamp]]:
-        """
-        Synthesize `text` conditioned on `speaker_wav`, returning the
-        concatenated waveform, its sample rate, and per-sentence timestamps.
-        """
+    def _conditioning(self, voice: VoiceSpec) -> tuple[Any, Any]:
+        key = str(voice.reference_wav) if voice.reference_wav else f"speaker:{voice.engine_voice_id}"
+        if key in self._latents:
+            self._latents.move_to_end(key)
+            return self._latents[key]
+
+        model = self._model
+        if voice.reference_wav is not None:
+            cfg = model.config
+            latents = model.get_conditioning_latents(
+                audio_path=[str(voice.reference_wav)],
+                gpt_cond_len=cfg.gpt_cond_len,
+                gpt_cond_chunk_len=cfg.gpt_cond_chunk_len,
+                max_ref_length=cfg.max_ref_len,
+                sound_norm_refs=cfg.sound_norm_refs,
+            )
+        else:
+            speakers = model.speaker_manager.speakers if model.speaker_manager else {}
+            if voice.engine_voice_id not in speakers:
+                raise InvalidJobError(f"XTTS has no built-in speaker '{voice.engine_voice_id}'")
+            latents = tuple(speakers[voice.engine_voice_id].values())
+
+        self._latents[key] = latents
+        if len(self._latents) > LATENT_CACHE_SIZE:
+            self._latents.popitem(last=False)
+        return latents
+
+    def synthesize_chunk(
+        self, text: str, voice: VoiceSpec, language: str, expressiveness: float = 1.0
+    ) -> np.ndarray:
         self.load()
-        assert self._model is not None
-
-        chunks = prepare_chunks(text)
-        if not chunks:
-            raise GenerationError("No synthesizable text remained after normalization.")
-
-        sample_rate = getattr(
-            getattr(self._model, "synthesizer", None), "output_sample_rate", None
-        ) or self.settings.OUTPUT_SAMPLE_RATE
-
-        acquired = self._generation_lock.acquire(timeout=self.settings.GENERATION_TIMEOUT_SECONDS)
-        if not acquired:
-            raise GenerationError("Server is busy; timed out waiting for a free generation slot.")
-
+        lang = LANG_ALIASES.get(language.lower(), language.lower())
+        gpt_cond_latent, speaker_embedding = self._conditioning(voice)
+        temperature = max(0.3, min(1.0, BASE_TEMPERATURE * expressiveness))
         try:
-            segments: List[np.ndarray] = []
-            pauses: List[float] = []
-            timestamps: List[SentenceTimestamp] = []
-            cursor = 0.0
+            out = self._model.inference(
+                text,
+                lang,
+                gpt_cond_latent,
+                speaker_embedding,
+                temperature=temperature,
+                enable_text_splitting=False,  # we already chunk
+            )
+        except Exception as exc:  # noqa: BLE001  (CUDA OOM etc. are worth a retry)
+            raise EngineError(f"XTTS inference failed: {exc}") from exc
+        wav = out["wav"]
+        if hasattr(wav, "cpu"):
+            wav = wav.cpu().numpy()
+        return np.asarray(wav, dtype=np.float32).reshape(-1)
 
-            # temperature nudges expressiveness; XTTS default is ~0.65-0.75
-            temperature = max(0.3, min(1.0, 0.65 * emotion_exaggeration))
-
-            for chunk in chunks:
-                wav = self._model.tts(
-                    text=chunk.text,
-                    speaker_wav=str(speaker_wav),
-                    language=language,
-                    temperature=temperature,
-                )
-                wav_array = np.asarray(wav, dtype=np.float32)
-                segments.append(wav_array)
-
-                pause = pause_for_punctuation(chunk.text)
-                pauses.append(pause)
-
-                duration = len(wav_array) / float(sample_rate)
-                start = cursor
-                end = cursor + duration
-                timestamps.append(
-                    SentenceTimestamp(index=chunk.index, text=chunk.text, start=round(start, 3), end=round(end, 3))
-                )
-                cursor = end + pause
-
-            from app.utils.audio_processing import concatenate_with_pauses
-
-            full_audio = concatenate_with_pauses(segments, sample_rate, pauses)
-            return full_audio, int(sample_rate), timestamps
-
-        except (GenerationError, ModelLoadError):
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Synthesis failed")
-            raise GenerationError(f"Speech synthesis failed: {exc}") from exc
-        finally:
-            self._generation_lock.release()
-
-
-def get_engine() -> XTTSEngine:
-    global _engine_instance
-    if _engine_instance is None:
-        with _engine_lock:
-            if _engine_instance is None:
-                _engine_instance = XTTSEngine()
-    return _engine_instance
+    def describe(self) -> dict[str, str | None]:
+        return {"engine": self.id, "model": self.model_name, "device": self.device_info.device}

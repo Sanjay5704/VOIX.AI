@@ -1,0 +1,7 @@
+# Real engines (install into the GPU venv, e.g. .\env). torch with CUDA should be
+# installed first from the PyTorch index for your CUDA version.
+-r requirements.txt
+torch>=2.4
+TTS==0.22.0          # XTTS-v2 (Coqui Public Model License: non-commercial)
+kokoro>=0.9.4        # Kokoro-82M (Apache-2.0)
+misaki[en]>=0.9.4

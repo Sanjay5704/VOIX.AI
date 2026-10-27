@@ -1,0 +1,6 @@
+# Worker core: enough to run the full pipeline with ENGINES=mock (CI, laptops without a GPU).
+# Deliberately no SQLAlchemy: the worker only talks to the API over HTTPS.
+httpx==0.28.1
+numpy==1.26.4
+soundfile==0.12.1
+pydantic-settings==2.7.1
