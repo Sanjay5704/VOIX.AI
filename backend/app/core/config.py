@@ -70,10 +70,10 @@ class Settings:
     FEMALE_VOICE_FILE: str = os.getenv("FEMALE_VOICE_FILE", "female_default.wav")
 
     # --- Generation limits ---
-    MAX_TEXT_LENGTH: int = int(os.getenv("MAX_TEXT_LENGTH", "5000"))
-    MAX_BATCH_ITEMS: int = int(os.getenv("MAX_BATCH_ITEMS", "50"))
+    MAX_TEXT_LENGTH: int = int(os.getenv("MAX_TEXT_LENGTH", "100000"))
+    MAX_BATCH_ITEMS: int = int(os.getenv("MAX_BATCH_ITEMS", "100"))
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "30"))
-    GENERATION_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_TIMEOUT_SECONDS", "300"))
+    GENERATION_TIMEOUT_SECONDS: int = int(os.getenv("GENERATION_TIMEOUT_SECONDS", "5000"))
 
     # --- Audio ---
     OUTPUT_SAMPLE_RATE: int = int(os.getenv("OUTPUT_SAMPLE_RATE", "24000"))

@@ -1,6 +1,6 @@
 import React from "react";
 
-const MAX_LENGTH = 5000;
+const MAX_LENGTH = 100000;
 
 export default function TextInput({ value, onChange, disabled }) {
   const remaining = MAX_LENGTH - value.length;
