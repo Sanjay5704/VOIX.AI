@@ -1,6 +1,6 @@
-"""Unit tests for app.utils.text_processing."""
+"""Unit tests for voix_worker.audio.text_processing."""
 
-from app.utils.text_processing import (
+from voix_worker.audio.text_processing import (
     chunk_sentence,
     normalize_text,
     prepare_chunks,

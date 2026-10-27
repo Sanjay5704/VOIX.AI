@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from app.models.schemas import SentenceTimestamp
+
+@dataclass(frozen=True)
+class SentenceTimestamp:
+    """One subtitle cue: a synthesized chunk and where it sits in the final audio."""
+
+    index: int
+    text: str
+    start: float
+    end: float
+
+    def scaled(self, speed: float) -> "SentenceTimestamp":
+        """Timestamps after an atempo speed change of `speed`."""
+        return SentenceTimestamp(self.index, self.text, round(self.start / speed, 3), round(self.end / speed, 3))
 
 
 def _format_timestamp(seconds: float) -> str:

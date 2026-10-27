@@ -38,3 +38,16 @@ Thumbs.db
 # --- IDE ---
 .vscode/
 .idea/
+
+# --- VOIX v2 runtime data ---
+data/
+api/data/
+worker/cache/
+worker/data/
+benchmarks/results/raw/
+*.sqlite3
+*.db
+.ruff_cache/
+coverage.xml
+.coverage
+env-*/

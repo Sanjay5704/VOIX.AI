@@ -22,10 +22,10 @@ from typing import List
 import numpy as np
 import soundfile as sf
 
-from app.core.exceptions import AudioProcessingError, FFmpegNotFoundError
-from app.core.logging_config import get_logger
+from voix_worker.errors import AudioProcessingError, FFmpegNotFoundError
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def ensure_ffmpeg_available() -> None:

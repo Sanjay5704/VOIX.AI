@@ -1,7 +1,6 @@
-"""Unit tests for app.utils.subtitle_generator."""
+"""Unit tests for voix_worker.audio.subtitles."""
 
-from app.models.schemas import SentenceTimestamp
-from app.utils.subtitle_generator import _format_timestamp, generate_srt
+from voix_worker.audio.subtitles import SentenceTimestamp, _format_timestamp, generate_srt
 
 
 def test_format_timestamp_basic():
