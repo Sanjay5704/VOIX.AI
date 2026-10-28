@@ -23,6 +23,8 @@ from voix_worker.errors import EngineError, InvalidJobError
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 24_000
+WARM_LANGUAGES = ("a", "b")  # American + British English: the seeded system voices
+WARMUP_VOICE = "af_heart"
 
 
 class KokoroEngine(Engine):
@@ -57,7 +59,15 @@ class KokoroEngine(Engine):
                 from kokoro import KModel
 
                 self._model = KModel(repo_id=self.repo_id).to(self.device_info.device).eval()
+                # G2P setup (spaCy, lexicons) and the first CUDA call cost seconds; pay them
+                # here so they count as load time instead of inflating the first job's RTF.
+                for lang_code in WARM_LANGUAGES:
+                    self._pipeline(lang_code)
+                for _ in self._pipeline("a")("Warm up.", voice=WARMUP_VOICE):
+                    pass
             except Exception as exc:  # noqa: BLE001
+                self._model = None
+                self._pipelines.clear()
                 raise EngineError(f"Could not load Kokoro model '{self.repo_id}': {exc}") from exc
             self.load_ms = int((time.perf_counter() - start) * 1000)
             logger.info("Kokoro loaded in %.1fs", self.load_ms / 1000)
