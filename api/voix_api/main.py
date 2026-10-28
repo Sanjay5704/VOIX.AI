@@ -12,11 +12,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from voix_api import __version__
+from voix_api import __version__, analytics
 from voix_api.config import Settings, get_settings
 from voix_api.db import init_engine, session_factory
 from voix_api.errors import install_error_handlers
 from voix_api.routes.internal import workers as internal_workers
+from voix_api.routes.v1 import analytics as analytics_routes
 from voix_api.routes.v1 import api_keys, auth, jobs, system, voices
 from voix_api.services.catalog import seed_system_voices
 
@@ -28,7 +29,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        init_engine(settings.database_url)
+        engine = init_engine(settings.database_url)
+        analytics.build(engine)  # (re)create dbt-style analytics views from analytics/models
         with session_factory()() as db:
             added = seed_system_voices(db, settings.enabled_engines)
         logger.info(
@@ -63,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         voices.router,
         jobs.router,
         system.router,
+        analytics_routes.router,
     ):
         app.include_router(router, prefix="/v1")
     app.include_router(internal_workers.router)

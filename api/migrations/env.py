@@ -44,6 +44,12 @@ def run_migrations_online() -> None:
 
 
 def _run(connection) -> None:
+    # Analytics views depend on table columns; drop them so migrations can alter
+    # those tables. The API rebuilds them on startup (voix_api.analytics.build).
+    from voix_api import analytics
+
+    analytics.drop(connection)
+    connection.commit()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
