@@ -1,0 +1,36 @@
+# Render Blueprint for the VOIX API (free web service, Docker).
+# Postgres comes from Neon and storage from Cloudflare R2: see docs/DEPLOY.md.
+services:
+  - type: web
+    name: voix-api
+    runtime: docker
+    rootDir: api
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false # Neon connection string (postgresql://...); normalised to psycopg automatically
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WORKER_TOKEN
+        generateValue: true # copy into worker/.env on the GPU laptop
+      - key: METRICS_TOKEN
+        generateValue: true
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false # https://<account-id>.r2.cloudflarestorage.com
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false # https://<your-project>.pages.dev
+      - key: ENABLED_ENGINES
+        value: kokoro,xtts
+      - key: LOG_FORMAT
+        value: json
