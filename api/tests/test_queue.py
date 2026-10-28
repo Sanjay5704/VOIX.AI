@@ -264,3 +264,38 @@ def test_worker_api_full_cycle(client, user, worker_headers, settings):
 
     usage = client.get("/v1/usage", headers=user["headers"]).json()
     assert usage["jobs_succeeded"] == 1 and usage["audio_seconds"] == 1.2
+
+
+def test_benchmark_upload_and_engine_summary(client, worker_headers):
+    assert client.get("/v1/benchmarks/latest").status_code == 404
+    assert all(e["benchmark"] is None for e in client.get("/v1/engines").json())
+
+    run = {
+        "host": "laptop",
+        "started_at": "2026-10-28T10:00:00Z",
+        "hardware": {"gpu": "RTX 4070 Laptop"},
+        "results": {
+            "engines": {
+                "kokoro": {
+                    "load_ms": 1200,
+                    "peak_vram_mb": 410,
+                    "summary": {"rtf_p50": 0.06, "wer_mean": 0.03},
+                }
+            }
+        },
+    }
+    assert client.post("/internal/benchmarks", json=run).status_code == 401  # worker token required
+    assert (
+        client.post("/internal/benchmarks", json={**run, "results": {}}, headers=worker_headers).status_code
+        == 400
+    )
+    assert client.post("/internal/benchmarks", json=run, headers=worker_headers).status_code == 201
+
+    latest = client.get("/v1/benchmarks/latest").json()
+    assert latest["host"] == "laptop" and latest["results"]["engines"]["kokoro"]["peak_vram_mb"] == 410
+    engines = {e["id"]: e for e in client.get("/v1/engines").json()}
+    assert (
+        engines["kokoro"]["benchmark"]["rtf_p50"] == 0.06
+        and engines["kokoro"]["benchmark"]["gpu"] == "RTX 4070 Laptop"
+    )
+    assert engines["xtts"]["benchmark"] is None

@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 from voix_api.config import Settings
 from voix_api.db import session_factory, utcnow
 from voix_api.errors import ApiError, not_found
-from voix_api.models import Job, JobStatus, JobType, Voice, Worker
+from voix_api.models import BenchmarkRun, Job, JobStatus, JobType, Voice, Worker
 from voix_api.schemas import (
+    BenchmarkRunIn,
     ClaimedJob,
     ClaimedVoice,
     ClaimIn,
@@ -231,3 +232,16 @@ def voice_reference(voice_id: uuid.UUID, db: DbDep, storage: StorageDep) -> Resp
 @router.get("/voices/{voice_id}/source", response_class=Response)
 def voice_source(voice_id: uuid.UUID, db: DbDep, storage: StorageDep) -> Response:
     return _voice_file(db, voice_id, "source_key", storage)
+
+
+@router.post("/benchmarks", status_code=status.HTTP_201_CREATED)
+def upload_benchmark(body: BenchmarkRunIn, db: DbDep) -> dict[str, Any]:
+    """Store an offline benchmark run produced on a worker host (benchmarks/run_benchmark.py)."""
+    if not isinstance(body.results.get("engines"), dict) or not body.results["engines"]:
+        raise ApiError(400, "bad_benchmark", "results.engines must be a non-empty object")
+    run = BenchmarkRun(
+        host=body.host, hardware=body.hardware, results=body.results, started_at=body.started_at
+    )
+    db.add(run)
+    db.commit()
+    return {"id": str(run.id)}

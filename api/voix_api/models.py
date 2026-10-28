@@ -25,6 +25,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -79,6 +80,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(100))
     plan: Mapped[str] = mapped_column(String(32), default="free")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -206,3 +208,20 @@ class AuditLog(Base):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     ip: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class BenchmarkRun(Base):
+    """One offline engine benchmark, uploaded by a worker host.
+
+    `results` holds the full per-engine, per-script measurements; the API
+    serves the latest run to the dashboard and folds a summary into /v1/engines.
+    """
+
+    __tablename__ = "benchmark_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    host: Mapped[str] = mapped_column(String(100))
+    hardware: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    results: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)

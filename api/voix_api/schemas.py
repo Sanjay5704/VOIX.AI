@@ -46,6 +46,7 @@ class UserOut(ORM):
     id: uuid.UUID
     email: str
     plan: str
+    is_admin: bool = False
     created_at: datetime
 
 
@@ -187,6 +188,25 @@ class EngineOut(BaseModel):
     languages: list[str]
     notes: str
     online: bool
+    benchmark: dict[str, Any] | None = Field(
+        default=None, description="Summary from the latest uploaded benchmark run, if any"
+    )
+
+
+class BenchmarkRunIn(BaseModel):
+    host: str = Field(min_length=1, max_length=100)
+    started_at: datetime
+    hardware: dict[str, Any] = Field(default_factory=dict)
+    results: dict[str, Any]
+
+
+class BenchmarkRunOut(ORM):
+    id: uuid.UUID
+    host: str
+    hardware: dict[str, Any]
+    results: dict[str, Any]
+    started_at: datetime
+    created_at: datetime
 
 
 # --- Internal (worker) API -------------------------------------------------------
