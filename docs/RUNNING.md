@@ -113,7 +113,29 @@ not modified). Needs a running worker with a cloning engine to prepare them.
 api\.venv\Scripts\python scripts\import_legacy_voices.py --email me@example.com --i-have-consent
 ```
 
-## 6. Tests
+## 6. Benchmarks and analytics
+
+```powershell
+# Benchmark engines on this GPU (writes benchmarks/results/*.json + docs/BENCHMARK.md)
+.\env\Scripts\python -m benchmarks.run_benchmark --engines kokoro,xtts --repeats 3
+
+# Publish the latest run to a running API (shows on the Benchmarks page and /v1/engines)
+.\env\Scripts\python -m benchmarks.run_benchmark --upload-file benchmarksesults\<file>.json
+
+# Grant yourself access to the Analytics page
+cd api; .\.venv\Scripts\python -m voix_api.admin promote me@example.com; cd ..
+
+# Generate real traffic through the queue (needs API + worker running)
+api\.venv\Scripts\python scripts\loadgen.py --users 4 --jobs 40
+
+# Inspect the analytics SQL as rendered for your database
+cd api; .\.venv\Scripts\python -m voix_api.analytics show fct_engine_daily; cd ..
+```
+
+The first benchmark run downloads `openai/whisper-small.en` (~1 GB) for the
+quality check. See [ANALYTICS.md](ANALYTICS.md) for the data models.
+
+## 7. Tests
 
 ```powershell
 # API (SQLite)
@@ -126,6 +148,9 @@ Remove-Item Env:TEST_DATABASE_URL
 
 # Worker (needs ffmpeg on PATH)
 cd worker; ..\env\Scripts\python -m pytest -p no:asyncio; cd ..
+
+# Benchmark metrics (WER/CER)
+api\.venv\Scripts\python -m pytest benchmarks
 
 # End to end: API + queue + worker (mock engine) in one process
 api\.venv\Scripts\python -m pip install -r worker\requirements.txt   # once

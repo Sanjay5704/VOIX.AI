@@ -61,3 +61,57 @@ Observations:
   synthesis RTF of 0.89–1.60. The engine now builds its pipelines and runs a
   warm-up inference in `load()`, so that cost is reported as model load. The
   remaining cold overhead on the `bm_george` run is that voicepack's first fetch.
+
+## 2026-10-28 — controlled benchmark, Kokoro vs XTTS (Phase 3)
+
+Full report: [BENCHMARK.md](BENCHMARK.md); raw data:
+`benchmarks/results/20261028T065315Z-Sanjay.json`. 6 fixed scripts × 3 repeats,
+same pipeline as production, quality checked with `openai/whisper-small.en`.
+
+| | Kokoro-82M | XTTS-v2 |
+|---|---:|---:|
+| Throughput (total audio ÷ total synthesis time) | **14.4× real time** | 1.5× real time |
+| Median per-script synthesis RTF | 0.079 | 0.473 |
+| Corpus WER / CER (Whisper round-trip) | **0.4% / 0.3%** | 2.3% / 1.4% |
+| Peak VRAM above baseline | **747 MB** | 2,028 MB |
+| Load + warm-up | 35.4 s | 102.5 s |
+| Short line (46 chars) synthesis | 310 ms | 8,045 ms |
+
+Observations:
+
+- Kokoro is ~10× higher throughput than XTTS on this laptop, at a third of the
+  VRAM, with fewer ASR errors. XTTS's value here is cloning, not speed.
+- **XTTS latency is highly variable for identical input:** the 185-char
+  explainer took 5.2 s, 17.3 s and 25.2 s across three repeats; the one-sentence
+  script took 7.2–9.0 s. Kokoro's repeats agreed within a few percent. This is
+  consistent with the earlier worker runs (RTF 2.4–3.0 on short multi-chunk
+  scripts) being draws from the slow end of the same distribution. Likely
+  cause (unverified): XTTS's sampled autoregressive decoder producing long token
+  sequences on some draws.
+- XTTS's highest WER was on the dialogue script (11.5%: short exclamations and
+  questions); Kokoro's only errors were on the abbreviations script.
+- Kokoro synthesis RTF measured in different sessions ranged 0.025–0.11 for
+  similar text; single-session numbers are comparable, cross-session ones less so
+  (laptop GPU boost/power management). The table above is one controlled run.
+
+## 2026-10-28 — real load through the queue (analytics)
+
+`scripts/loadgen.py --users 4 --jobs 40 --xtts-share 0.15` against the API +
+one GPU worker (both engines preloaded). Result: 36 succeeded, 1 failed
+(punctuation-only script, rejected as non-retryable), 3 canceled; one user hit
+the 10 jobs/min rate limit and backed off per `Retry-After`.
+
+From `/v1/analytics` (includes the day's earlier manual jobs):
+
+| Engine | Finished jobs | Failure rate | Render p50 | Render p95 | Queue wait p50 | Queue wait p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| kokoro | 42 | 2.6% | 830 ms | 40.2 s | 34.0 s | 51.5 s |
+| xtts | 7 | 0.0% | 20.1 s | 178.9 s | 21.0 s | 35.2 s |
+
+- **Head-of-line blocking:** Kokoro jobs render in under a second but waited a
+  median 34 s, because a single worker processes the queue in order and the
+  burst's XTTS jobs (≈20 s each) sat in front of them. Fixes, not yet built:
+  run one worker per engine, or prefer short/fast-engine jobs when claiming.
+- The p95 render times are the day's cold-start jobs (first Kokoro job after a
+  worker start: 40 s; first XTTS job: 179 s), which is why workers now support
+  `--preload`.

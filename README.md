@@ -4,8 +4,8 @@ Paste a script → pick or clone a voice → get a voiceover with SRT subtitles,
 plus job history. The same engine is exposed as a REST API with API keys,
 quotas and usage metering.
 
-> **Status:** control plane, queue, GPU worker (Phase 1) and the React dashboard
-> (Phase 2) are done; benchmarks/analytics and CI/deploy are next.
+> **Status:** control plane, queue and GPU worker; React dashboard; engine
+> benchmarks and analytics are done. CI and free-tier deployment are next.
 > See [docs/RUNNING.md](docs/RUNNING.md) to run it.
 
 ## Architecture (short version)
@@ -37,9 +37,19 @@ api/        FastAPI control plane, SQLAlchemy 2.0 models, Alembic migrations, te
 worker/     GPU worker: engines, synthesis pipeline (chunking, pauses, pitch, speed, loudnorm, SRT)
 frontend/   React dashboard: studio, history, voice library + consent flow, API keys, usage
 tests_e2e/  API + queue + worker in one process with the mock engine
-scripts/    legacy voice import
-docs/       RUNNING.md (how to run), MEASUREMENTS.md (real benchmark numbers)
+benchmarks/ multi-engine benchmark: latency, RTF, VRAM, Whisper round-trip WER/CER
+scripts/    legacy voice import, load generator
+docs/       RUNNING.md, BENCHMARK.md (generated), ANALYTICS.md, MEASUREMENTS.md
 ```
+
+## Measured on an RTX 4070 Laptop GPU
+
+From [docs/BENCHMARK.md](docs/BENCHMARK.md) (6 scripts × 3 repeats, Whisper round-trip):
+
+| Engine | Throughput | WER | Peak VRAM |
+|---|---:|---:|---:|
+| Kokoro-82M | 14.4× real time | 0.4% | 747 MB |
+| XTTS-v2 | 1.5× real time | 2.3% | 2,028 MB |
 
 ## Engines and licences
 
