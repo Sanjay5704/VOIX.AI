@@ -71,7 +71,7 @@ ENGINES: dict[str, EngineInfo] = {
     "mock": EngineInfo(
         id="mock",
         name="Mock tone engine",
-        license="MIT (project code)",
+        license="Project code (no model weights)",
         commercial_use=True,
         supports_cloning=True,
         languages=("en",),

@@ -1,121 +1,60 @@
-# NaturalSpeech — Production Text-to-Speech Application
+# VOIX — AI voiceover studio + developer TTS API
 
-A complete, production-ready text-to-speech system built on **Coqui XTTS-v2**
-(state-of-the-art open-source multilingual, voice-cloning-capable TTS),
-served through a **FastAPI** backend and a **React** frontend.
+Paste a script → pick or clone a voice → get a voiceover with SRT subtitles,
+plus job history. The same engine is exposed as a REST API with API keys,
+quotas and usage metering.
 
-It generates natural, expressive speech — proper pauses at punctuation,
-correct handling of abbreviations and sentence boundaries, adjustable
-speed/pitch, optional emotion-leaning delivery, two built-in voices
-(Male / Female), on-the-fly voice cloning from an uploaded sample,
-per-sentence timestamps, `.srt` subtitle export, batch processing, and
-WAV/MP3 export — running entirely locally on a consumer GPU or CPU.
+> **Status:** Phase 1 (control plane, queue, GPU worker) is done. The React
+> dashboard is being rebuilt against the new API (Phase 2); until then use the
+> Swagger UI at `/docs`. See [docs/RUNNING.md](docs/RUNNING.md) to run it.
 
----
-
-## Project layout
+## Architecture (short version)
 
 ```
-xtts-app/
-├── backend/                  FastAPI + XTTS-v2 TTS engine
-│   ├── app/
-│   │   ├── api/               Route handlers (tts, voices, health)
-│   │   ├── core/               Config, logging, exceptions
-│   │   ├── models/              Pydantic request/response schemas
-│   │   ├── services/             TTS engine, voice registry, cloning, batch
-│   │   ├── utils/                  Text processing, audio (ffmpeg), SRT, files
-│   │   └── main.py                  FastAPI app entrypoint
-│   ├── tests/                Unit + API tests (pytest)
-│   ├── voices/                Reference speaker clips (male/female/custom)
-│   ├── outputs/                 Generated audio/subtitle files (runtime)
-│   ├── uploads/                   Temp upload staging (runtime)
-│   ├── logs/                       Rotating log files (runtime)
-│   ├── requirements.txt
-│   ├── .env.example
-│   └── Dockerfile
-├── frontend/                  React (Vite) single-page app
-│   ├── src/
-│   │   ├── components/         UI components
-│   │   ├── hooks/                Data/state hooks
-│   │   ├── services/              API client
-│   │   └── styles/                  Design system CSS
-│   ├── package.json
-│   ├── nginx.conf
-│   └── Dockerfile
-├── docker-compose.yml        Full stack, GPU by default
-├── docker-compose.cpu.yml    CPU-only override
-└── docs/
-    ├── INSTALL.md             Step-by-step setup (local + Docker)
-    └── API.md                  Full API reference
+ browser / API client ──HTTPS──▶  FastAPI control plane  ──▶  Postgres  (users, keys, voices, jobs = queue, usage, audit)
+                                        │      ▲                └──▶  object storage (local disk or S3/R2)
+                                        │      │ claim / heartbeat / complete   (outbound HTTPS only)
+                                        ▼      │
+                                   GPU worker on a laptop (XTTS-v2 / Kokoro / mock)
 ```
 
-## Quick start
+- **Async jobs.** `POST /v1/jobs/tts` returns `202` at once. Rendering happens on a worker.
+- **Pull-based worker.** The worker makes only outbound requests, so it works behind home NAT.
+  While it is off, jobs stay `queued` and `/v1/health` reports the worker offline.
+- **Queue in Postgres, no Redis.** Claims use `SELECT … FOR UPDATE SKIP LOCKED`. Jobs carry
+  leases that worker heartbeats extend; expired leases are reaped lazily (requeue until
+  `max_attempts`, then fail). Retries back off exponentially. Cancellation is cooperative.
+- **Auth.** JWT for the dashboard, `vx_live_…` API keys (stored as sha256) for developers.
+  Workers use a separate token.
+- **Limits.** Monthly character quotas per plan and per-user rate limits. Both are computed from
+  the database, so they hold across API instances. `Idempotency-Key` makes retries safe.
+- **Voice cloning is consent-gated.** Uploads require an explicit consent statement, which is
+  stored with the voice and written to an audit log.
+- **Separate packages.** `api/` has no torch dependency; `worker/` has no SQLAlchemy dependency.
 
-See **[docs/INSTALL.md](docs/INSTALL.md)** for full setup instructions,
-including GPU driver setup, FFmpeg installation, and voice customization.
-
-**Fastest path (Docker, GPU):**
-
-```bash
-git clone <this-repo>
-cd xtts-app
-cp backend/.env.example backend/.env
-docker compose up --build
+```
+api/        FastAPI control plane, SQLAlchemy 2.0 models, Alembic migrations, tests
+worker/     GPU worker: engines, synthesis pipeline (chunking, pauses, pitch, speed, loudnorm, SRT)
+tests_e2e/  API + queue + worker in one process with the mock engine
+scripts/    legacy voice import
+docs/       RUNNING.md (how to run), MEASUREMENTS.md (real benchmark numbers)
 ```
 
-Then open **http://localhost:3000**.
+## Engines and licences
 
-**Fastest path (Docker, CPU-only):**
+| Engine | Licence | Commercial use | Cloning | Role |
+|---|---|---|---|---|
+| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | Apache-2.0 (weights) | Yes | No, fixed voicepacks | Default engine |
+| [Coqui XTTS-v2](https://huggingface.co/coqui/XTTS-v2) | Coqui Public Model License 1.0 | **No** (non-commercial only) | Yes, 3–60 s reference | Cloning / demo |
+| Mock | Project code | Yes | Yes (ignored) | Tests and CI |
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
-```
+Coqui (the company) has shut down, so a commercial XTTS licence can no longer be
+obtained. Any deployment that charges users must disable XTTS
+(`ENABLED_ENGINES=kokoro`). This project is a portfolio demo and does not charge anyone.
 
-## Core technology choices
+Only clone voices you have explicit permission to use.
 
-| Concern | Choice | Why |
-|---|---|---|
-| TTS model | Coqui **XTTS-v2** | Best open-source quality/latency tradeoff; native zero-shot voice cloning; 17-language multilingual support; runs on consumer GPUs (8GB+) or CPU |
-| Backend | **FastAPI** | Async-first, typed (Pydantic), auto-generated OpenAPI docs, production-grade |
-| Frontend | **React** (Vite) | Fast dev loop, component-driven UI, no server dependency for the SPA |
-| Audio processing | **FFmpeg** | Industry-standard, reliable speed/pitch/format conversion without re-synthesis |
-| Natural prosody | Sentence-level chunking + punctuation-aware pause insertion | XTTS quality degrades on long inputs; per-sentence synthesis + inserted silence mimics human breath/pause patterns |
+## Licence
 
-## Key design decisions worth knowing
-
-- **Sentence-level synthesis, not whole-paragraph.** Text is normalized,
-  split into sentences, and (if still too long) sub-chunked on clause
-  boundaries. Each chunk is synthesized independently, then concatenated
-  with a punctuation-aware silence gap (longer after `.`/`!`/`?`, shorter
-  after `,`/`;`). This is what gives the output natural cadence instead of
-  a rushed, robotic run-on — and it's also what makes accurate per-sentence
-  timestamps (and therefore `.srt` subtitles) possible.
-- **Speed and pitch are post-processed via FFmpeg**, not only via XTTS's
-  internal `speed` parameter — this decouples the two controls and keeps
-  pitch-shifting independent of tempo (asetrate + compensating atempo
-  chain, no external rubberband plugin dependency).
-- **Device auto-detection.** On startup the backend detects CUDA
-  availability and VRAM, enabling fp16 only when there's enough headroom,
-  and transparently falls back to CPU with no code changes needed.
-- **Voice cloning is zero-shot.** No fine-tuning step — XTTS conditions
-  generation on a short reference clip (3-60s) at inference time.
-
-## Testing
-
-```bash
-cd backend
-pip install -r requirements.txt
-pytest tests/ -v
-```
-
-The test suite covers text normalization/sentence-splitting, SRT
-generation, and full API routing/validation/error-handling — the API
-tests mock the XTTS engine itself so they run in seconds without
-downloading model weights.
-
-## License notes
-
-Coqui XTTS-v2 is distributed under the **Coqui Public Model License**,
-which permits non-commercial use freely; commercial use requires a
-separate license from Coqui. Review the license terms before deploying
-commercially. See `docs/INSTALL.md` for details and links.
+No licence has been chosen for the project code yet (all rights reserved until one is added).
+Model weights keep their own licences (above).
