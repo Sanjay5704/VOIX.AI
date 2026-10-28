@@ -61,6 +61,8 @@ cd worker
 
 - `--engines mock` runs the full pipeline with generated tones (no GPU, no model download).
 - `--once` processes a single job and exits.
+- With several engines the worker runs one claim loop per engine (`LANES=per-engine`),
+  shown on `/v1/health` as `<name>:kokoro` and `<name>:xtts`.
 - **Ctrl+C** releases the current job back to the queue without spending a retry
   attempt; a second Ctrl+C exits immediately (the lease then expires and the API
   requeues the job).

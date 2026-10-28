@@ -115,3 +115,23 @@ From `/v1/analytics` (includes the day's earlier manual jobs):
 - The p95 render times are the day's cold-start jobs (first Kokoro job after a
   worker start: 40 s; first XTTS job: 179 s), which is why workers now support
   `--preload`.
+
+## 2026-10-28 — head-of-line blocking fixed with per-engine lanes
+
+The worker now runs one claim loop per engine (`LANES=per-engine`, the default),
+so a Kokoro job no longer waits behind XTTS jobs. Same load as before
+(`scripts/loadgen.py --users 4 --jobs 40 --xtts-share 0.15`, seed 7; same
+outcome: 36 succeeded, 1 failed, 3 canceled). Queue wait = enqueue → claim,
+nearest-rank percentiles over that run's jobs.
+
+| | Before (one loop) | After (per-engine lanes) |
+|---|---:|---:|
+| Kokoro queue wait p50 | 34.0 s | **2.2 s** |
+| Kokoro queue wait p95 | 51.5 s | **5.1 s** |
+| XTTS queue wait p50 | 15.5 s | 12.8 s |
+| Kokoro render p50 | 0.78 s | 0.86 s |
+| XTTS render p50 (n=4) | 7.87 s | 10.74 s |
+
+The cost is GPU sharing: renders are somewhat slower while both engines run
+at once (XTTS n=4 is small and within its normal run-to-run spread). The old
+behaviour remains available with `LANES=shared`.

@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import secrets
 import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -32,6 +34,25 @@ EXTRA = [
     "Breathe in slowly, hold for a moment, and let it go.",
 ]
 UNSPEAKABLE = "... !!! ???"  # passes API validation, but nothing is left to synthesise
+
+
+def nearest_rank(values: list[float], pct: int) -> float | None:
+    ordered = sorted(values)
+    return ordered[max(1, math.ceil(len(ordered) * pct / 100)) - 1] if ordered else None
+
+
+def print_queue_waits(jobs: list[dict]) -> None:
+    """Queue wait (enqueue -> claim) per engine for this run's jobs."""
+
+    def wait_s(j: dict) -> float:
+        started, created = datetime.fromisoformat(j["started_at"]), datetime.fromisoformat(j["created_at"])
+        return (started - created).total_seconds()
+
+    for engine in sorted({j["engine"] for j in jobs}):
+        waits = [wait_s(j) for j in jobs if j["engine"] == engine and j["started_at"]]
+        if waits:
+            p50, p95 = nearest_rank(waits, 50), nearest_rank(waits, 95)
+            print(f"  {engine:7} queue wait over {len(waits)} jobs: p50 {p50:.1f} s, p95 {p95:.1f} s")
 
 
 def main() -> int:
@@ -84,21 +105,24 @@ def main() -> int:
             http.post(f"/v1/jobs/{job['id']}/cancel", headers=user["h"])
         time.sleep(rng.uniform(0.2, 2.0))  # arrivals spread out, so queue waits vary
 
-    print("waiting for the worker to drain the queue…")
+    print("waiting for the worker to drain the queue...")
     pending = list(submitted)
     statuses: dict[str, int] = {}
+    finished: list[dict] = []
     while pending:
         time.sleep(3)
         still = []
         for user, job_id in pending:
-            status = http.get(f"/v1/jobs/{job_id}", headers=user["h"]).json()["status"]
-            if status in ("queued", "running"):
+            job = http.get(f"/v1/jobs/{job_id}", headers=user["h"]).json()
+            if job["status"] in ("queued", "running"):
                 still.append((user, job_id))
             else:
-                statuses[status] = statuses.get(status, 0) + 1
+                statuses[job["status"]] = statuses.get(job["status"], 0) + 1
+                finished.append(job)
         pending = still
         print(f"  {len(pending)} still queued/running")
     print("done:", statuses)
+    print_queue_waits(finished)
     return 0
 
 

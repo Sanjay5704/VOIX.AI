@@ -23,7 +23,7 @@ flowchart LR
         S3[(Object storage<br/>R2 / local)]
     end
     subgraph Laptop["GPU worker (RTX 4070 laptop)"]
-        W[voix_worker<br/>Kokoro-82M · XTTS-v2]
+        W[voix_worker<br/>lane per engine:<br/>Kokoro-82M · XTTS-v2]
     end
     UI -- JWT --> API
     DEV --> API
@@ -95,7 +95,7 @@ measurements are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
 | Separate `api/` and `worker/` packages | API image stays small (no torch); worker has no database access or credentials. | The JSON contract is duplicated; the e2e test guards it. |
 | Kokoro as the default engine | Apache-2.0, ~10× XTTS throughput, a third of the VRAM. | No cloning; XTTS is kept for that and labelled non-commercial. |
 | Analytics as SQL views in the app DB | Always fresh, no pipeline to schedule, same models in tests. | Heavier queries share the OLTP database; a warehouse would come first at scale. |
-| One worker processes jobs in order | Simple and predictable. | **Head-of-line blocking** seen in real load: fast Kokoro jobs waited a median 34 s behind slow XTTS jobs. Next step: a worker per engine, or claiming fast-engine jobs first. |
+| One claim loop ("lane") per engine in the worker | Real load showed **head-of-line blocking**: Kokoro jobs waited a median 34 s behind slow XTTS jobs. Lanes cut that to **2.2 s** (p95 51.5 s → 5.1 s). | Engines share the GPU, so renders are somewhat slower while both run. `LANES=shared` keeps the old single loop. |
 
 ## Run it
 
@@ -115,7 +115,7 @@ docs/       RUNNING, DEPLOY, BENCHMARK (generated), ANALYTICS, MEASUREMENTS
 
 ## Testing and CI
 
-81 automated tests: 47 API, 27 worker, 3 end-to-end, 4 benchmark-metric. GitHub
+84 automated tests: 47 API, 30 worker, 3 end-to-end, 4 benchmark-metric. GitHub
 Actions runs ruff, the API suite on **SQLite and Postgres 16** (including Alembic
 upgrade → check → downgrade → upgrade and a 6-thread concurrent-claim test), worker
 tests with ffmpeg, the end-to-end suite with the mock engine, the frontend build,
@@ -138,13 +138,14 @@ portfolio demo and charges no one. Only clone voices you have permission to use.
 - Built **VOIX**, a text-to-speech SaaS (FastAPI, PostgreSQL, React) with a
   Postgres-backed job queue (`SKIP LOCKED` leases, heartbeats, retries with
   back-off, cancellation) and a pull-based GPU worker that serves a hosted API
-  from a laptop behind NAT; 81 automated tests, CI on SQLite and Postgres.
+  from a laptop behind NAT; 84 automated tests, CI on SQLite and Postgres.
 - Benchmarked two TTS models on an RTX 4070 with a Whisper round-trip quality
   check: Kokoro-82M ran at **14.4× real time with 0.4% WER and 747 MB VRAM** vs
   XTTS-v2 at 1.5×, 2.3% and 2.0 GB, and made the Apache-2.0 model the default.
 - Modelled job and usage data into dbt-style SQL marts portable across Postgres
-  and SQLite (DAU, failure rate, p50/p95 latency and queue wait); real-load analysis
-  found head-of-line blocking (**34 s median queue wait for sub-second jobs**).
+  and SQLite (DAU, failure rate, p50/p95 latency and queue wait); used them to find
+  head-of-line blocking under real load and fixed it with per-engine worker lanes,
+  cutting median queue wait for fast jobs **from 34 s to 2.2 s** (p95 51.5 s → 5.1 s).
 - Implemented production basics: JWT plus hashed API keys, idempotency keys,
   database-enforced quotas and rate limits, consent-audited voice cloning,
   Prometheus metrics, and JSON logs with request IDs.
