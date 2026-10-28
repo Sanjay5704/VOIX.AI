@@ -36,7 +36,7 @@ def test_wrong_password_and_unknown_user_look_identical(client):
     wrong = client.post("/v1/auth/login", json={"email": "bob@example.com", "password": "nope nope nope"})
     unknown = client.post("/v1/auth/login", json={"email": "ghost@example.com", "password": "nope nope nope"})
     assert wrong.status_code == unknown.status_code == 401
-    assert wrong.json() == unknown.json()
+    assert wrong.json()["error"] == unknown.json()["error"]  # request_id differs, nothing else
 
 
 def test_password_policy(client):

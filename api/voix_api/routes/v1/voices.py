@@ -20,6 +20,7 @@ from sqlalchemy import or_, select
 from voix_api.db import utcnow
 from voix_api.errors import ApiError, not_found
 from voix_api.models import Job, JobStatus, JobType, Voice, VoiceStatus
+from voix_api.observability import JOBS_CREATED
 from voix_api.schemas import VoiceCloneOut, VoiceOut
 from voix_api.security.deps import DbDep, PrincipalDep, SettingsDep, client_ip
 from voix_api.services import audit, limits
@@ -164,6 +165,7 @@ def clone_voice(
         via=principal.via,
     )
     db.commit()
+    JOBS_CREATED.labels("prepare_voice", engine).inc()
     return VoiceCloneOut(voice=VoiceOut.model_validate(voice), job_id=job.id)
 
 

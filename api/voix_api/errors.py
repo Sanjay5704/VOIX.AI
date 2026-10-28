@@ -32,7 +32,12 @@ def not_found(what: str) -> ApiError:
 
 
 def _body(code: str, message: str, details: Any = None) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message, "details": details or {}}}
+    from voix_api.observability import current_request_id
+
+    return {
+        "error": {"code": code, "message": message, "details": details or {}},
+        "request_id": current_request_id(),
+    }
 
 
 def install_error_handlers(app: FastAPI) -> None:

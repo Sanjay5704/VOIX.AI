@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     max_text_chars: int = 5_000
     max_upload_mb: int = 20
 
+    # --- Observability ---
+    log_format: Literal["json", "text"] = "json"
+    log_level: str = "INFO"
+    metrics_token: SecretStr | None = None  # if set, /metrics requires "Authorization: Bearer <token>"
+
     @model_validator(mode="before")
     @classmethod
     def _split_csv_lists(cls, data: dict) -> dict:
@@ -73,6 +78,15 @@ class Settings(BaseSettings):
                 if isinstance(value, str):
                     data[k] = [v.strip() for v in value.split(",") if v.strip()]
         return data
+
+    @model_validator(mode="after")
+    def _normalise_database_url(self) -> Settings:
+        # Hosted Postgres (Neon, Render, Heroku-style) hands out postgres:// URLs;
+        # SQLAlchemy needs the driver spelled out.
+        for prefix in ("postgres://", "postgresql://"):
+            if self.database_url.startswith(prefix):
+                self.database_url = "postgresql+psycopg://" + self.database_url[len(prefix) :]
+        return self
 
     @model_validator(mode="after")
     def _refuse_dev_secrets_in_production(self) -> Settings:

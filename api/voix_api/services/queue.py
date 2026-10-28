@@ -42,6 +42,7 @@ from voix_api.models import (
     VoiceStatus,
     Worker,
 )
+from voix_api.observability import JOB_PROCESSING, JOBS_FINISHED
 
 REAP_BATCH = 100
 
@@ -207,6 +208,7 @@ def complete(
         job.voice.error = None
 
     if job.type == JobType.synthesize and usage is not None:
+        JOB_PROCESSING.labels(job.engine).observe(float(usage.get("processing_ms", 0)) / 1000)
         queue_ms = int((job.started_at - job.created_at).total_seconds() * 1000) if job.started_at else 0
         db.add(
             UsageEvent(
@@ -281,6 +283,7 @@ def _requeue(job: Job, now: datetime, error: str, backoff: timedelta | None) -> 
 
 
 def _finish(job: Job, status: JobStatus, now: datetime, error: str | None = None) -> None:
+    JOBS_FINISHED.labels(job.type.value, job.engine, status.value).inc()
     job.status = status
     job.finished_at = now
     job.lease_expires_at = None
