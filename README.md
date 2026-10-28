@@ -1,121 +1,126 @@
-# NaturalSpeech — Production Text-to-Speech Application
+# VOIX — local AI text-to-speech
 
-A complete, production-ready text-to-speech system built on **Coqui XTTS-v2**
-(state-of-the-art open-source multilingual, voice-cloning-capable TTS),
-served through a **FastAPI** backend and a **React** frontend.
+[![CI](https://github.com/Sanjay5704/VOIX.AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Sanjay5704/VOIX.AI/actions/workflows/ci.yml)
 
-It generates natural, expressive speech — proper pauses at punctuation,
-correct handling of abbreviations and sentence boundaries, adjustable
-speed/pitch, optional emotion-leaning delivery, two built-in voices
-(Male / Female), on-the-fly voice cloning from an uploaded sample,
-per-sentence timestamps, `.srt` subtitle export, batch processing, and
-WAV/MP3 export — running entirely locally on a consumer GPU or CPU.
+Type a script, pick a voice, get natural-sounding speech with subtitles. Runs on
+your own computer (GPU or CPU). You can also clone a voice from a short clip.
 
----
+Built with **FastAPI**, **React** and two open-source TTS models:
 
-## Project layout
-
-```
-xtts-app/
-├── backend/                  FastAPI + XTTS-v2 TTS engine
-│   ├── app/
-│   │   ├── api/               Route handlers (tts, voices, health)
-│   │   ├── core/               Config, logging, exceptions
-│   │   ├── models/              Pydantic request/response schemas
-│   │   ├── services/             TTS engine, voice registry, cloning, batch
-│   │   ├── utils/                  Text processing, audio (ffmpeg), SRT, files
-│   │   └── main.py                  FastAPI app entrypoint
-│   ├── tests/                Unit + API tests (pytest)
-│   ├── voices/                Reference speaker clips (male/female/custom)
-│   ├── outputs/                 Generated audio/subtitle files (runtime)
-│   ├── uploads/                   Temp upload staging (runtime)
-│   ├── logs/                       Rotating log files (runtime)
-│   ├── requirements.txt
-│   ├── .env.example
-│   └── Dockerfile
-├── frontend/                  React (Vite) single-page app
-│   ├── src/
-│   │   ├── components/         UI components
-│   │   ├── hooks/                Data/state hooks
-│   │   ├── services/              API client
-│   │   └── styles/                  Design system CSS
-│   ├── package.json
-│   ├── nginx.conf
-│   └── Dockerfile
-├── docker-compose.yml        Full stack, GPU by default
-├── docker-compose.cpu.yml    CPU-only override
-└── docs/
-    ├── INSTALL.md             Step-by-step setup (local + Docker)
-    └── API.md                  Full API reference
-```
-
-## Quick start
-
-See **[docs/INSTALL.md](docs/INSTALL.md)** for full setup instructions,
-including GPU driver setup, FFmpeg installation, and voice customization.
-
-**Fastest path (Docker, GPU):**
-
-```bash
-git clone <this-repo>
-cd xtts-app
-cp backend/.env.example backend/.env
-docker compose up --build
-```
-
-Then open **http://localhost:3000**.
-
-**Fastest path (Docker, CPU-only):**
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
-```
-
-## Core technology choices
-
-| Concern | Choice | Why |
+| Model | What it's good at | Licence |
 |---|---|---|
-| TTS model | Coqui **XTTS-v2** | Best open-source quality/latency tradeoff; native zero-shot voice cloning; 17-language multilingual support; runs on consumer GPUs (8GB+) or CPU |
-| Backend | **FastAPI** | Async-first, typed (Pydantic), auto-generated OpenAPI docs, production-grade |
-| Frontend | **React** (Vite) | Fast dev loop, component-driven UI, no server dependency for the SPA |
-| Audio processing | **FFmpeg** | Industry-standard, reliable speed/pitch/format conversion without re-synthesis |
-| Natural prosody | Sentence-level chunking + punctuation-aware pause insertion | XTTS quality degrades on long inputs; per-sentence synthesis + inserted silence mimics human breath/pause patterns |
+| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | Fast, light, clear. The default. | Apache-2.0 |
+| [Coqui XTTS-v2](https://huggingface.co/coqui/XTTS-v2) | Voice cloning from a 3–60 s clip, many languages | Non-commercial only |
 
-## Key design decisions worth knowing
+![VOIX app](docs/screenshot.png)
 
-- **Sentence-level synthesis, not whole-paragraph.** Text is normalized,
-  split into sentences, and (if still too long) sub-chunked on clause
-  boundaries. Each chunk is synthesized independently, then concatenated
-  with a punctuation-aware silence gap (longer after `.`/`!`/`?`, shorter
-  after `,`/`;`). This is what gives the output natural cadence instead of
-  a rushed, robotic run-on — and it's also what makes accurate per-sentence
-  timestamps (and therefore `.srt` subtitles) possible.
-- **Speed and pitch are post-processed via FFmpeg**, not only via XTTS's
-  internal `speed` parameter — this decouples the two controls and keeps
-  pitch-shifting independent of tempo (asetrate + compensating atempo
-  chain, no external rubberband plugin dependency).
-- **Device auto-detection.** On startup the backend detects CUDA
-  availability and VRAM, enabling fp16 only when there's enough headroom,
-  and transparently falls back to CPU with no code changes needed.
-- **Voice cloning is zero-shot.** No fine-tuning step — XTTS conditions
-  generation on a short reference clip (3-60s) at inference time.
+## Features
 
-## Testing
+- Two voice engines in one app: pick a voice and VOIX uses the right model.
+- Voice cloning from your own recording (XTTS), with a permission checkbox.
+- Natural pacing: text is split into sentences, with pauses based on punctuation
+  (`.` `?` `!` pause longer than `,`) and common abbreviations expanded (`Dr.` → "Doctor").
+- Speed and pitch control, loudness normalisation, WAV or MP3 output (ffmpeg).
+- SRT subtitles with per-sentence timestamps, and a clickable transcript in the player.
+- Batch generation endpoint and auto-generated API docs at `/docs`.
 
-```bash
-cd backend
-pip install -r requirements.txt
-pytest tests/ -v
+## How it works
+
+```
+text ──► split into sentences ──► model speaks each sentence ──► join with pauses
+     ──► pitch / speed / loudness (ffmpeg) ──► .wav / .mp3  +  .srt subtitles
 ```
 
-The test suite covers text normalization/sentence-splitting, SRT
-generation, and full API routing/validation/error-handling — the API
-tests mock the XTTS engine itself so they run in seconds without
-downloading model weights.
+- `backend/app/services/engines.py` — the two models behind one small interface
+  (`synthesize_chunk(text, voice) -> audio`). Models load once and stay in memory.
+- `backend/app/services/synthesis_service.py` — the pipeline above.
+- `backend/app/utils/` — text splitting, ffmpeg audio processing, SRT writing.
+- `frontend/` — single-page React app (Vite).
 
-## License notes
+## Benchmark: Kokoro vs XTTS on my laptop
 
-Coqui XTTS-v2 is distributed under the **Coqui Public Model License**,
-which permits non-commercial use freely; commercial use requires a
-separate license from Coqui. Review the license terms before deploying
-commercially. See `docs/INSTALL.md` for details and links.
+I wrote a benchmark (`benchmarks/`) that renders 6 test scripts 3 times with each
+model, measures speed and GPU memory, then runs the audio through **Whisper**
+(speech-to-text) to check the words come out right. Full results:
+[docs/BENCHMARK.md](docs/BENCHMARK.md).
+
+Measured on an **RTX 4070 Laptop GPU (8 GB)**:
+
+| | Kokoro-82M | XTTS-v2 |
+|---|---:|---:|
+| Speed | **14.4× faster than real time** | 1.5× faster than real time |
+| Word error rate (Whisper) | **0.4%** | 2.3% |
+| GPU memory | **747 MB** | 2,028 MB |
+| One short sentence | 0.3 s | 8.0 s |
+
+What I took from it: Kokoro is the better default (faster, clearer, free to use);
+XTTS is worth its cost only when you need a cloned voice. XTTS speed also varied a
+lot between runs of the same text (5–25 s), which I'd like to investigate next.
+
+## Run it (Windows)
+
+Needs Python 3.11, Node 18+, and [ffmpeg](https://ffmpeg.org/) on PATH. An NVIDIA GPU
+is optional but much faster.
+
+```powershell
+# 1. Backend
+python -m venv env
+.\env\Scripts\pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+.\env\Scripts\pip install -r backend\requirements-ml.txt
+cd backend
+..\env\Scripts\python -m uvicorn app.main:app --port 8000
+```
+
+```powershell
+# 2. Frontend (second terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. The first run downloads the models (Kokoro ~330 MB,
+XTTS ~1.8 GB). Using XTTS means accepting the Coqui Public Model License.
+
+Options go in `backend/.env` (see `backend/.env.example`), e.g.
+`ENABLED_ENGINES=kokoro` to run without XTTS.
+
+## API example
+
+```powershell
+curl -X POST http://localhost:8000/api/v1/generate `
+  -H "Content-Type: application/json" `
+  -d '{"text": "Hello from VOIX.", "voice_id": "af_heart", "output_format": "mp3"}'
+```
+
+The response has `audio_url`, `srt_url`, sentence timestamps and how fast it ran.
+`GET /api/v1/voices` lists voices; `POST /api/v1/voices/clone` clones one.
+
+## Tests
+
+```powershell
+cd backend
+..\env\Scripts\python -m pytest
+```
+
+The tests swap the real model for a fake one that makes tones, so the whole
+pipeline (splitting, ffmpeg, subtitles, downloads) is tested without a GPU.
+GitHub Actions runs them, plus lint and the frontend build, on every push.
+
+## Run the benchmark yourself
+
+```powershell
+.\env\Scripts\python -m benchmarks.run_benchmark --engines kokoro,xtts
+```
+
+## How this was built
+
+This started as my single-user XTTS app (the first commit). I then refined it with
+help from an AI coding assistant (Claude Code): the Kokoro engine, bug fixes, the
+benchmark, tests and CI. I ran every benchmark on my own GPU, and every number
+here comes from those runs.
+
+## Licence notes
+
+XTTS-v2 is non-commercial only, and Coqui (the company) has shut down, so no
+commercial licence can be bought. Kokoro-82M is Apache-2.0. Only clone voices you
+have permission to use. No licence has been chosen for this project's own code yet.
