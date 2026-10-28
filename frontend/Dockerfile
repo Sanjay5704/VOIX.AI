@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 #
-# React frontend — multi-stage build: Node build stage -> Nginx serve stage
+# VOIX dashboard: Vite build -> static files served by Nginx
 #
 FROM node:20-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 ARG VITE_API_BASE_URL=

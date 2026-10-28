@@ -51,3 +51,6 @@ benchmarks/results/raw/
 coverage.xml
 .coverage
 env-*/
+
+# local tooling
+.claude/
