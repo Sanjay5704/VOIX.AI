@@ -2,8 +2,10 @@ import React from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext.jsx";
 import Layout from "./components/Layout.jsx";
+import Analytics from "./pages/Analytics.jsx";
 import ApiKeys from "./pages/ApiKeys.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
+import Benchmarks from "./pages/Benchmarks.jsx";
 import { History, JobDetail } from "./pages/History.jsx";
 import Studio from "./pages/Studio.jsx";
 import Usage from "./pages/Usage.jsx";
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="/voices" element={<Voices />} />
         <Route path="/keys" element={<ApiKeys />} />
         <Route path="/usage" element={<Usage />} />
+        <Route path="/benchmarks" element={<Benchmarks />} />
+        <Route path="/analytics" element={<Analytics />} />
       </Route>
       <Route path="*" element={<Navigate to="/studio" replace />} />
     </Routes>

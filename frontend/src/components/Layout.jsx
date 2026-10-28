@@ -13,6 +13,8 @@ const NAV = [
   { to: "/voices", label: "Voices", hint: "Library & cloning" },
   { to: "/keys", label: "API keys", hint: "Developer access" },
   { to: "/usage", label: "Usage", hint: "Quota & metering" },
+  { to: "/benchmarks", label: "Benchmarks", hint: "Engines, measured" },
+  { to: "/analytics", label: "Analytics", hint: "Platform health", admin: true },
 ];
 
 export default function Layout() {
@@ -34,7 +36,7 @@ export default function Layout() {
           </div>
 
           <nav className="rail__nav" aria-label="Main">
-            {NAV.map((item, i) => (
+            {NAV.filter((item) => !item.admin || user?.is_admin).map((item, i) => (
               <NavLink key={item.to} to={item.to} className="rail__link">
                 <span className="rail__index">{String(i + 1).padStart(2, "0")}</span>
                 <span className="rail__text">

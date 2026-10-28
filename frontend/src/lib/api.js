@@ -82,6 +82,8 @@ export const api = {
   health: () => request("/v1/health", { auth: false }),
   engines: () => request("/v1/engines", { auth: false }),
   usage: () => request("/v1/usage"),
+  latestBenchmark: () => request("/v1/benchmarks/latest", { auth: false }),
+  analytics: (days = 30) => request(`/v1/analytics?days=${days}`),
 
   // voices
   voices: () => request("/v1/voices"),
