@@ -1,16 +1,14 @@
-"""Offline multi-engine TTS benchmark.
+"""Benchmark the TTS engines on this machine.
 
-For every engine: load it (timed), warm it up once, render each script
-`--repeats` times through the *production* synthesis pipeline, and record
-latency, real-time factor and peak VRAM. Then unload all TTS models, load
-Whisper, transcribe each rendered file and score it against the text the
-engine was asked to speak (WER/CER: an intelligibility proxy, not a
-naturalness score).
+For each engine: load it (timed), warm it up once, then render each script in
+`scripts.json` several times through the app's real pipeline (`generate_speech`)
+and record speed and peak GPU memory. Afterwards every render is transcribed with
+Whisper and compared with the script (word/character error rate), as a check
+that the speech is understandable.
 
 Run from the repo root with the GPU venv:
 
     .\\env\\Scripts\\python -m benchmarks.run_benchmark --engines kokoro,xtts
-    .\\env\\Scripts\\python -m benchmarks.run_benchmark --engines kokoro,xtts --upload   # also POST to the API
 
 Writes benchmarks/results/<timestamp>-<host>.json and docs/BENCHMARK.md.
 """
@@ -28,20 +26,23 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "worker"))
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.core.config import get_settings  # noqa: E402
+from app.models.schemas import AudioFormat, GenerateRequest  # noqa: E402
+from app.services import engines as engines_module  # noqa: E402
+from app.services.synthesis_service import generate_speech  # noqa: E402
+from app.utils.text_processing import prepare_chunks  # noqa: E402
 
 from benchmarks.metrics import ErrorCounts, score  # noqa: E402
 from benchmarks.report import render_markdown  # noqa: E402
-from voix_worker.audio.text_processing import prepare_chunks  # noqa: E402
-from voix_worker.engines.base import Engine, VoiceSpec  # noqa: E402
-from voix_worker.pipeline.synthesize import run_synthesis  # noqa: E402
 
-DEFAULT_VOICES = {"kokoro": "af_heart", "xtts": "Ana Florence", "mock": "tone_a"}
+VOICES = {"kokoro": "af_heart", "xtts": "xtts_ana"}
 
 
 def _torch():
@@ -57,11 +58,7 @@ def hardware_info() -> dict[str, Any]:
     os_name = f"{platform.system()} {platform.release()}"
     if platform.system() == "Windows" and int(platform.version().split(".")[-1]) >= 22000:
         os_name = "Windows 11"  # platform.release() still says "10" on Windows 11
-    info: dict[str, Any] = {
-        "os": os_name,
-        "cpu": platform.processor() or platform.machine(),
-        "python": platform.python_version(),
-    }
+    info: dict[str, Any] = {"os": os_name, "cpu": platform.processor(), "python": platform.python_version()}
     torch = _torch()
     if torch is not None:
         props = torch.cuda.get_device_properties(0)
@@ -74,78 +71,42 @@ def hardware_info() -> dict[str, Any]:
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+                capture_output=True, text=True, timeout=10,
+            )  # fmt: skip
             info["driver"] = out.stdout.strip()
         except (OSError, subprocess.SubprocessError):
             pass
     return info
 
 
-def build_engine(name: str) -> Engine:
-    if name == "mock":
-        from voix_worker.engines.mock import MockEngine
-
-        return MockEngine()
-    if name == "kokoro":
-        from voix_worker.engines.kokoro import KokoroEngine
-
-        return KokoroEngine("hexgrad/Kokoro-82M", "auto")
-    if name == "xtts":
-        from voix_worker.engines.xtts import XTTSEngine
-
-        return XTTSEngine("tts_models/multilingual/multi-dataset/xtts_v2", "auto")
-    raise SystemExit(f"unknown engine {name!r}")
+def render(text: str, voice_id: str) -> tuple[dict[str, Any], Path]:
+    """One render through the app pipeline. Returns timings and the wav path."""
+    resp = generate_speech(
+        GenerateRequest(text=text, voice_id=voice_id, output_format=AudioFormat.WAV, generate_subtitles=False)
+    )
+    synthesis_ms = int(resp.real_time_factor * resp.duration_seconds * 1000)
+    wav = get_settings().OUTPUTS_DIR / f"{resp.job_id}.wav"
+    return {"synthesis_ms": synthesis_ms, "audio_seconds": resp.duration_seconds}, wav
 
 
-def spoken_text(text: str) -> str:
-    """What the engine is actually asked to say, after the pipeline's normalisation."""
-    return " ".join(c.text for c in prepare_chunks(text))
-
-
-def bench_engine(
-    name: str, voice_id: str, scripts: list[dict], repeats: int, workdir: Path
-) -> dict[str, Any]:
+def bench_engine(name: str, scripts: list[dict], repeats: int) -> dict[str, Any]:
     torch = _torch()
     if torch is not None:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         base_mb = torch.cuda.memory_allocated() / 2**20
 
-    engine = build_engine(name)
+    engine = engines_module.get_engine(name)
     t0 = time.perf_counter()
     engine.load()
     load_ms = int((time.perf_counter() - t0) * 1000)
-    voice = VoiceSpec(voice_id=f"bench-{voice_id}", engine_voice_id=voice_id)
-
-    # One discarded render so first-call CUDA/kernel setup doesn't skew script 1.
-    run_synthesis(
-        engine, voice, {"text": "Warm up.", "output_format": "wav", "subtitles": False}, workdir / "warmup"
-    )
+    render("Warm up.", VOICES[name])  # discarded: first-call GPU setup
 
     rows = []
     for script in scripts:
-        runs = []
-        for r in range(repeats):
-            out = run_synthesis(
-                engine,
-                voice,
-                {"text": script["text"], "output_format": "wav", "subtitles": False},
-                workdir / name / f"{script['id']}-{r}",
-            )
-            m = out.result["metrics"]
-            runs.append(
-                {
-                    "synthesis_ms": m["synthesis_ms"],
-                    "processing_ms": m["processing_ms"],
-                    "audio_seconds": out.result["duration_seconds"],
-                    "path": str(out.audio_path),
-                }
-            )
-        synth = [x["synthesis_ms"] for x in runs]
-        audio_s = statistics.median(x["audio_seconds"] for x in runs)
+        runs = [render(script["text"], VOICES[name]) for _ in range(repeats)]
+        synth = [r[0]["synthesis_ms"] for r in runs]
+        audio_s = statistics.median(r[0]["audio_seconds"] for r in runs)
         rows.append(
             {
                 "id": script["id"],
@@ -155,34 +116,24 @@ def bench_engine(
                 "audio_seconds": round(audio_s, 3),
                 "synthesis_ms": synth,
                 "synthesis_ms_p50": int(statistics.median(synth)),
-                "processing_ms_p50": int(statistics.median(x["processing_ms"] for x in runs)),
                 "rtf": round(statistics.median(synth) / 1000 / audio_s, 4) if audio_s else None,
-                "_audio_path": runs[0]["path"],
+                "_audio_path": str(runs[0][1]),
             }
         )
-        print(
-            f"  {name:6} {script['id']:13} {audio_s:6.2f}s audio  synth p50 {rows[-1]['synthesis_ms_p50']:6d} ms  RTF {rows[-1]['rtf']}"
-        )
+        took = rows[-1]["synthesis_ms_p50"]
+        print(f"  {name:6} {script['id']:13} {audio_s:6.2f}s audio  synthesis {took:6d} ms")
 
-    peak_mb = None
-    if torch is not None:
-        peak_mb = round(torch.cuda.max_memory_allocated() / 2**20 - base_mb, 1)
-    describe = engine.describe()
+    peak_mb = round(torch.cuda.max_memory_allocated() / 2**20 - base_mb, 1) if torch is not None else None
     engine.unload()
-    del engine
+    engines_module._engines.pop(name, None)
     gc.collect()
     if torch is not None:
         torch.cuda.empty_cache()
-    return {
-        "voice": voice_id,
-        "load_ms": load_ms,
-        "peak_vram_mb": peak_mb,
-        "describe": describe,
-        "scripts": rows,
-    }
+    return {"voice": VOICES[name], "load_ms": load_ms, "peak_vram_mb": peak_mb, "scripts": rows}
 
 
 def transcribe_all(results: dict[str, Any], scripts: list[dict], asr_model: str) -> None:
+    """Whisper round-trip: transcribe each render and score it against its script."""
     from transformers import pipeline
 
     torch = _torch()
@@ -193,27 +144,24 @@ def transcribe_all(results: dict[str, Any], scripts: list[dict], asr_model: str)
         torch_dtype=torch.float16 if torch is not None else None,
         chunk_length_s=30,
     )
-    texts = {s["id"]: spoken_text(s["text"]) for s in scripts}
+    expected = {s["id"]: " ".join(c.text for c in prepare_chunks(s["text"])) for s in scripts}
     for engine in results.values():
         total = ErrorCounts(0, 0, 0, 0)
         for row in engine["scripts"]:
-            hyp = asr(row.pop("_audio_path"))["text"].strip()
-            counts = score(texts[row["id"]], hyp)
+            heard = asr(row.pop("_audio_path"))["text"].strip()
+            counts = score(expected[row["id"]], heard)
             total = total + counts
-            row.update(transcript=hyp, wer=round(counts.wer, 4), cer=round(counts.cer, 4))
-        engine["asr_totals"] = total.__dict__
+            row.update(transcript=heard, wer=round(counts.wer, 4), cer=round(counts.cer, 4))
         engine["corpus_wer"] = round(total.wer, 4)
         engine["corpus_cer"] = round(total.cer, 4)
 
 
 def summarize(engine: dict[str, Any]) -> dict[str, Any]:
     rows = engine["scripts"]
-    rtfs = [r["rtf"] for r in rows if r["rtf"] is not None]
     total_audio = sum(r["audio_seconds"] for r in rows)
     total_synth = sum(r["synthesis_ms_p50"] for r in rows) / 1000
     return {
-        "rtf_p50": round(statistics.median(rtfs), 4),
-        "rtf_overall": round(total_synth / total_audio, 4) if total_audio else None,
+        "rtf_p50": round(statistics.median(r["rtf"] for r in rows if r["rtf"] is not None), 4),
         "x_realtime": round(total_audio / total_synth, 1) if total_synth else None,
         "latency_ms_short": next((r["synthesis_ms_p50"] for r in rows if r["id"] == "short"), None),
         "wer": engine.get("corpus_wer"),
@@ -225,22 +173,8 @@ def summarize(engine: dict[str, Any]) -> dict[str, Any]:
 def _rel(path: Path) -> str:
     try:
         return path.resolve().relative_to(ROOT).as_posix()
-    except ValueError:
+    except ValueError:  # outside the repo
         return path.as_posix()
-
-
-def upload(run: dict[str, Any], api_url: str, token: str) -> str:
-    import httpx
-
-    payload = {k: run[k] for k in ("host", "started_at", "hardware")} | {"results": run}
-    resp = httpx.post(
-        f"{api_url.rstrip('/')}/internal/benchmarks",
-        json=payload,
-        headers={"X-Worker-Token": token},
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()["id"]
 
 
 def main() -> int:
@@ -251,46 +185,33 @@ def main() -> int:
     p.add_argument("--skip-asr", action="store_true")
     p.add_argument("--out", type=Path, default=ROOT / "benchmarks" / "results")
     p.add_argument("--report", type=Path, default=ROOT / "docs" / "BENCHMARK.md")
-    p.add_argument("--upload", action="store_true", help="POST results to API_URL/internal/benchmarks")
-    p.add_argument("--api-url", default=os.environ.get("API_URL", "http://localhost:8000"))
-    p.add_argument("--upload-file", type=Path, help="upload an existing results JSON and exit")
-    p.add_argument(
-        "--render-only", type=Path, help="re-render the markdown report from a results JSON and exit"
-    )
+    p.add_argument("--render-only", type=Path, help="re-make the markdown report from a saved results JSON")
     args = p.parse_args()
 
-    token = os.environ.get("WORKER_TOKEN", "dev-insecure-worker-token")
     if args.render_only:
         run = json.loads(args.render_only.read_text(encoding="utf-8"))
         args.report.write_text(render_markdown(run, _rel(args.render_only)), encoding="utf-8")
-        print(f"rendered {_rel(args.report)}")
-        return 0
-    if args.upload_file:
-        run = json.loads(args.upload_file.read_text(encoding="utf-8"))
-        print(f"uploaded run {upload(run, args.api_url, token)} to {args.api_url}")
+        print(f"rendered {args.report}")
         return 0
 
     os.environ.setdefault("COQUI_TOS_AGREED", "1")
     scripts = json.loads((ROOT / "benchmarks" / "scripts.json").read_text(encoding="utf-8"))["scripts"]
-    engines = [e.strip() for e in args.engines.split(",") if e.strip()]
-    started = datetime.now(UTC)
+    names = [e.strip() for e in args.engines.split(",") if e.strip()]
+    started = datetime.now(timezone.utc)
     hw = hardware_info()
-    print(
-        f"Benchmarking {engines} on {hw.get('gpu', 'CPU')} - {len(scripts)} scripts x {args.repeats} repeats"
-    )
+    print(f"Benchmarking {names} on {hw.get('gpu', 'CPU')}: {len(scripts)} scripts x {args.repeats} repeats")
 
-    results: dict[str, Any] = {}
+    settings = get_settings()
     with tempfile.TemporaryDirectory(prefix="voix-bench-") as tmp:
-        for name in engines:
-            print(f"[{name}] loading + rendering")
-            results[name] = bench_engine(name, DEFAULT_VOICES[name], scripts, args.repeats, Path(tmp))
-        if not args.skip_asr:
-            print(f"[asr] transcribing with {args.asr_model}")
-            transcribe_all(results, scripts, args.asr_model)
-        else:
+        settings.OUTPUTS_DIR = Path(tmp)  # keep benchmark renders out of the app's outputs folder
+        results = {name: bench_engine(name, scripts, args.repeats) for name in names}
+        if args.skip_asr:
             for engine in results.values():
                 for row in engine["scripts"]:
                     row.pop("_audio_path", None)
+        else:
+            print(f"[asr] transcribing with {args.asr_model}")
+            transcribe_all(results, scripts, args.asr_model)
 
     for engine in results.values():
         engine["summary"] = summarize(engine)
@@ -298,13 +219,8 @@ def main() -> int:
     run = {
         "host": socket.gethostname(),
         "started_at": started.isoformat(),
-        "finished_at": datetime.now(UTC).isoformat(),
         "hardware": hw,
-        "settings": {
-            "repeats": args.repeats,
-            "asr_model": None if args.skip_asr else args.asr_model,
-            "scripts_version": 1,
-        },
+        "settings": {"repeats": args.repeats, "asr_model": None if args.skip_asr else args.asr_model},
         "engines": results,
     }
     args.out.mkdir(parents=True, exist_ok=True)
@@ -312,9 +228,6 @@ def main() -> int:
     out_file.write_text(json.dumps(run, indent=2), encoding="utf-8")
     args.report.write_text(render_markdown(run, _rel(out_file)), encoding="utf-8")
     print(f"wrote {_rel(out_file)} and {_rel(args.report)}")
-
-    if args.upload:
-        print(f"uploaded run {upload(run, args.api_url, token)} to {args.api_url}")
     return 0
 
 
