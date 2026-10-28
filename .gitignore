@@ -38,3 +38,8 @@ Thumbs.db
 # --- IDE ---
 .vscode/
 .idea/
+
+# local notes and caches
+study/
+.ruff_cache/
+benchmarks/results/raw/
