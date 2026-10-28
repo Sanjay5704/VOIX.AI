@@ -47,3 +47,10 @@ def test_prepare_chunks_indexing():
     chunks = prepare_chunks(text)
     assert [c.index for c in chunks] == list(range(len(chunks)))
     assert chunks[0].text == "First sentence."
+
+
+def test_prepare_chunks_drops_unspeakable_chunks():
+    assert prepare_chunks("... !!! ???") == []
+    assert prepare_chunks("?! ... ;") == []
+    # stray punctuation attached to real words is fine: the chunk is still speakable
+    assert [c.text for c in prepare_chunks("Hello. Bye!")] == ["Hello.", "Bye!"]
