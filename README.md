@@ -133,22 +133,13 @@ Coqui has shut down, so a commercial XTTS licence can no longer be obtained. A
 deployment that charges users must run `ENABLED_ENGINES=kokoro`. This project is a
 portfolio demo and charges no one. Only clone voices you have permission to use.
 
-## Resume bullets
+## How this was built
 
-- Built **VOIX**, a text-to-speech SaaS (FastAPI, PostgreSQL, React) with a
-  Postgres-backed job queue (`SKIP LOCKED` leases, heartbeats, retries with
-  back-off, cancellation) and a pull-based GPU worker that serves a hosted API
-  from a laptop behind NAT; 84 automated tests, CI on SQLite and Postgres.
-- Benchmarked two TTS models on an RTX 4070 with a Whisper round-trip quality
-  check: Kokoro-82M ran at **14.4× real time with 0.4% WER and 747 MB VRAM** vs
-  XTTS-v2 at 1.5×, 2.3% and 2.0 GB, and made the Apache-2.0 model the default.
-- Modelled job and usage data into dbt-style SQL marts portable across Postgres
-  and SQLite (DAU, failure rate, p50/p95 latency and queue wait); used them to find
-  head-of-line blocking under real load and fixed it with per-engine worker lanes,
-  cutting median queue wait for fast jobs **from 34 s to 2.2 s** (p95 51.5 s → 5.1 s).
-- Implemented production basics: JWT plus hashed API keys, idempotency keys,
-  database-enforced quotas and rate limits, consent-audited voice cloning,
-  Prometheus metrics, and JSON logs with request IDs.
+I started VOIX as a single-user XTTS app (the first commit) and then rebuilt it
+into this architecture with an AI coding assistant (Claude Code), which is why
+commits carry a `Co-Authored-By` line. I made the design calls (pull-based worker,
+Postgres queue, Kokoro as default after benchmarking), ran every benchmark and
+load test on my own GPU, and every number in this README comes from those runs.
 
 ## Licence
 

@@ -54,3 +54,6 @@ env-*/
 
 # local tooling
 .claude/
+
+# personal interview notes (kept local)
+study/
