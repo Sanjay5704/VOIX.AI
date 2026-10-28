@@ -20,6 +20,8 @@ class WorkerSettings(BaseSettings):
     # Comma-separated in env: ENGINES=kokoro,xtts  (or ENGINES=mock for CPU-only runs)
     engines: Annotated[list[str], NoDecode] = ["kokoro", "xtts"]
     device: Literal["auto", "cuda", "cpu"] = "auto"
+    # per-engine: one claim loop per engine (no head-of-line blocking); shared: one loop for all
+    lanes: Literal["per-engine", "shared"] = "per-engine"
     use_fp16: bool = False
 
     cache_dir: Path = Path("cache")

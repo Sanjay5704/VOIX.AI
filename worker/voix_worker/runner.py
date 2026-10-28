@@ -1,5 +1,9 @@
 """The worker loop: claim -> run (with lease heartbeats) -> upload -> repeat.
 
+Lanes: with several engines, one process runs one claim loop ("lane") per
+engine in its own thread, so a fast Kokoro job never waits behind a slow
+XTTS job (head-of-line blocking measured under real load before this).
+
 Shutdown (Ctrl+C): the current job is aborted at the next chunk boundary and
 *released* back to the queue without spending an attempt, unless it is
 already uploading, in which case the upload finishes first. A second Ctrl+C
@@ -68,24 +72,28 @@ class Worker:
         client: WorkerClient,
         engines: dict[str, Engine],
         settings: WorkerSettings,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self.client = client
         self.engines = engines
         self.settings = settings
-        self.stop_event = threading.Event()
+        self.stop_event = stop_event or threading.Event()
         self._uploading = False
         self.cache_dir = Path(settings.cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # --- lifecycle --------------------------------------------------------------
 
-    def install_signal_handlers(self) -> None:
+    def install_signal_handlers(self, lanes: list[Worker] | None = None) -> None:
+        lanes = lanes or [self]
+
         def _handle(signum: int, _frame: Any) -> None:
             if self.stop_event.is_set():
                 logger.warning("Second interrupt: exiting now")
                 raise SystemExit(130)
+            uploading = any(w._uploading for w in lanes)
             logger.info(
-                "Shutdown requested; %s", "finishing upload" if self._uploading else "releasing current job"
+                "Shutdown requested; %s", "finishing uploads" if uploading else "releasing current jobs"
             )
             self.stop_event.set()
 
@@ -235,3 +243,35 @@ class Worker:
             "metrics": {"processing_ms": int((time.perf_counter() - t0) * 1000)},
         }
         return result, {"reference": reference}
+
+
+def build_lanes(
+    make_client: Any, engines: dict[str, Engine], settings: WorkerSettings, worker_name: str
+) -> list[Worker]:
+    """One Worker per engine sharing a stop event, or a single Worker for all
+    engines when lanes are disabled. `make_client(name, engine_names)` builds
+    each lane's API client."""
+    stop = threading.Event()
+    if settings.lanes == "shared" or len(engines) == 1:
+        return [Worker(make_client(worker_name, list(engines)), engines, settings, stop)]
+    return [
+        Worker(make_client(f"{worker_name}:{name}", [name]), {name: engine}, settings, stop)
+        for name, engine in engines.items()
+    ]
+
+
+def run_lanes(lanes: list[Worker]) -> None:
+    """Run every lane in its own thread; Ctrl+C stops them all gracefully."""
+    lanes[0].install_signal_handlers(lanes)
+    if len(lanes) == 1:
+        lanes[0].run_forever()
+        return
+    threads = [
+        threading.Thread(target=w.run_forever, name=f"lane-{list(w.engines)[0]}", daemon=True) for w in lanes
+    ]
+    for t in threads:
+        t.start()
+    # join with a timeout so the main thread keeps handling signals (Windows)
+    while any(t.is_alive() for t in threads):
+        for t in threads:
+            t.join(0.5)
