@@ -47,7 +47,7 @@ agg AS (
 SELECT
     a.day, a.engine, a.jobs, a.succeeded, a.failed, a.canceled, a.chars, a.audio_seconds,
     a.avg_synthesis_rtf, a.users,
-    a.failed * 1.0 / NULLIF(a.succeeded + a.failed, 0) AS failure_rate,
+    CAST(a.failed AS DOUBLE PRECISION) / NULLIF(a.succeeded + a.failed, 0) AS failure_rate,
     p.p50_processing_ms, p.p95_processing_ms,
     q.p50_queue_ms, q.p95_queue_ms
 FROM agg AS a

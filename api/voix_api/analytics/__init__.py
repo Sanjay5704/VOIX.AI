@@ -33,7 +33,7 @@ def _day(dialect: str, col: str) -> str:
 
 def _ms_between(dialect: str, a: str, b: str) -> str:
     if dialect == "postgresql":
-        return f"(EXTRACT(EPOCH FROM ({a} - {b})) * 1000.0)"
+        return f"CAST(EXTRACT(EPOCH FROM ({a} - {b})) * 1000 AS DOUBLE PRECISION)"
     return f"((julianday({a}) - julianday({b})) * 86400000.0)"
 
 

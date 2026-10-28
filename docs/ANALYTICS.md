@@ -51,7 +51,7 @@ tests). Where the dialects differ, a macro renders the right SQL:
 | Macro | Postgres | SQLite |
 |---|---|---|
 | `{{ day("ts") }}` | `CAST((ts AT TIME ZONE 'UTC') AS DATE)` | `date(ts)` |
-| `{{ ms_between("a", "b") }}` | `EXTRACT(EPOCH FROM (a - b)) * 1000.0` | `(julianday(a) - julianday(b)) * 86400000.0` |
+| `{{ ms_between("a", "b") }}` | `CAST(EXTRACT(EPOCH FROM (a - b)) * 1000 AS DOUBLE PRECISION)` | `(julianday(a) - julianday(b)) * 86400000.0` |
 | `{{ json_num("col", "k1", "k2") }}` | `CAST((col #>> '{k1,k2}') AS DOUBLE PRECISION)` | `CAST(json_extract(col, '$.k1.k2') AS REAL)` |
 | `{{ ref("model") }}` | the model name; also defines build order (topological sort) | same |
 

@@ -24,6 +24,7 @@ sys.path[:0] = [str(ROOT / "api"), str(ROOT / "worker")]
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from voix_api import analytics  # noqa: E402
 from voix_api.config import Settings, get_settings  # noqa: E402
 from voix_api.db import Base, init_engine  # noqa: E402
 from voix_api.main import create_app  # noqa: E402
@@ -48,6 +49,8 @@ def stack(tmp_path):
         clone_engine="mock",
     )
     engine = init_engine(url)
+    with engine.begin() as conn:  # views depend on tables; drop them first (matters on Postgres)
+        analytics.drop(conn)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     app = create_app(settings)
