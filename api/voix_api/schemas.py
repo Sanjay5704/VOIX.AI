@@ -144,6 +144,12 @@ class JobOut(ORM):
 # --- Usage / health / engines ----------------------------------------------------
 
 
+class LimitsOut(BaseModel):
+    max_text_chars: int
+    max_upload_mb: int
+    rate_limit_jobs_per_minute: int
+
+
 class UsageOut(BaseModel):
     plan: str
     period_start: datetime
@@ -153,6 +159,7 @@ class UsageOut(BaseModel):
     chars_remaining: int
     audio_seconds: float
     jobs_succeeded: int
+    limits: LimitsOut
 
 
 class WorkerOut(ORM):

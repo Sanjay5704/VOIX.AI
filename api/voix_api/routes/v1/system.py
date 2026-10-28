@@ -6,7 +6,7 @@ from fastapi import APIRouter, Response, status
 from sqlalchemy import func, select, text
 
 from voix_api.models import Job, JobStatus
-from voix_api.schemas import EngineOut, HealthOut, UsageOut, WorkerOut
+from voix_api.schemas import EngineOut, HealthOut, LimitsOut, UsageOut, WorkerOut
 from voix_api.security.deps import DbDep, PrincipalDep, SettingsDep
 from voix_api.services import limits, queue
 from voix_api.services.catalog import ENGINES
@@ -27,6 +27,11 @@ def get_usage(db: DbDep, principal: PrincipalDep, settings: SettingsDep) -> Usag
         chars_remaining=max(0, s.chars_quota - s.chars_used),
         audio_seconds=s.audio_seconds,
         jobs_succeeded=s.jobs_succeeded,
+        limits=LimitsOut(
+            max_text_chars=settings.max_text_chars,
+            max_upload_mb=settings.max_upload_mb,
+            rate_limit_jobs_per_minute=settings.rate_limit_jobs_per_minute,
+        ),
     )
 
 

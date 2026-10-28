@@ -61,6 +61,7 @@ def test_quota_enforced_and_released_on_cancel(client, user, settings):
 
     usage = client.get("/v1/usage", headers=user["headers"]).json()
     assert usage["chars_used"] == 60 and usage["chars_remaining"] == 40
+    assert usage["limits"] == {"max_text_chars": 5000, "max_upload_mb": 20, "rate_limit_jobs_per_minute": 100}
 
     # Canceling a queued job releases its reservation.
     assert (
