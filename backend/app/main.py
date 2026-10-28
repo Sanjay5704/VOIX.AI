@@ -21,9 +21,9 @@ from app.api import health_routes, tts_routes, voice_routes
 from app.core.config import get_settings
 from app.core.exceptions import TTSAppError
 from app.core.logging_config import get_logger, setup_logging
-from app.services.tts_engine import get_engine
+from app.services.engines import get_engine, loaded_engines
+from app.services.voice_registry import get_voice_registry
 from app.utils.file_manager import cleanup_old_outputs
-from app.utils.voice_assets import ensure_default_voice_assets
 
 setup_logging()
 logger = get_logger(__name__)
@@ -38,28 +38,35 @@ def _background_cleanup_loop(interval_seconds: int = 3600) -> None:
             logger.exception("Background cleanup failed")
 
 
+def _safe_load(engine) -> None:
+    try:
+        engine.load()
+    except Exception:  # noqa: BLE001
+        logger.exception("Warm-up load failed; the model will load on first request instead")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info("Starting %s v%s (env=%s)", settings.APP_NAME, settings.APP_VERSION, settings.ENVIRONMENT)
 
-    ensure_default_voice_assets()
+    # Warm-load the default voice's engine in a background thread so the server
+    # starts accepting requests immediately; other engines load on first use.
+    try:
+        default_engine, _ = get_voice_registry().resolve(settings.DEFAULT_VOICE)
+        engine = get_engine(default_engine.value)
+        threading.Thread(target=_safe_load, args=(engine,), daemon=True, name="model-warmup").start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Skipping model warm-up: %s", exc)
 
-    # Warm-load the model in a background thread so the server starts
-    # accepting requests immediately; first request may still wait if it
-    # arrives before loading completes (engine.load() is idempotent/locked).
-    engine = get_engine()
-    threading.Thread(target=engine.load, daemon=True, name="model-warmup").start()
-
-    cleanup_thread = threading.Thread(
-        target=_background_cleanup_loop, daemon=True, name="output-cleanup"
-    )
+    cleanup_thread = threading.Thread(target=_background_cleanup_loop, daemon=True, name="output-cleanup")
     cleanup_thread.start()
 
     yield
 
     logger.info("Shutting down, releasing model resources...")
-    engine.unload()
+    for engine in loaded_engines().values():
+        engine.unload()
 
 
 settings = get_settings()
@@ -68,9 +75,9 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description=(
-        "Production text-to-speech API powered by Coqui XTTS-v2. "
-        "Supports male/female presets, voice cloning, speed/pitch control, "
-        "timestamped subtitles, and batch processing."
+        "Local text-to-speech API with two engines: Kokoro-82M (fast, default) and "
+        "Coqui XTTS-v2 (voice cloning). Speed/pitch control, timestamped subtitles, "
+        "and batch processing."
     ),
     lifespan=lifespan,
 )

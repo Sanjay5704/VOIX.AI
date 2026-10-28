@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "note": "Fixed benchmark scripts (written for this project). No digits: WER compares words, and engines differ in how they verbalise numbers.",
+  "scripts": [
+    {
+      "id": "short",
+      "kind": "single sentence",
+      "text": "Welcome back to the studio, let's get started."
+    },
+    {
+      "id": "narration",
+      "kind": "documentary narration",
+      "text": "Far below the surface of the northern sea, a forest of kelp sways in the current. Here, in the cold green light, an entire community depends on a single fragile plant. When the water warms, the forest thins, and everything that lives within it must adapt or move on."
+    },
+    {
+      "id": "explainer",
+      "kind": "product explainer",
+      "text": "Uploading a file is simple. Drag it into the window, choose who can see it, and press share. That's it! Your team gets a link straight away, and you can revoke access whenever you like."
+    },
+    {
+      "id": "abbreviations",
+      "kind": "abbreviations and titles",
+      "text": "Dr. Patel met Mr. Okafor at the St. James clinic, e.g. for the annual review. They discussed the results, i.e. what had changed since the spring."
+    },
+    {
+      "id": "dialogue",
+      "kind": "questions and emphasis",
+      "text": "Are you sure about this? Absolutely not! But we're going anyway, aren't we? Fine. Bring the lantern, and whatever happens, don't let go of the rope."
+    },
+    {
+      "id": "long",
+      "kind": "long paragraph, multi-chunk",
+      "text": "The history of the printing press is often told as the story of one inventor, but the truth is more interesting. Paper, ink, and the screw press had existed for centuries before anyone combined them with movable metal type. What changed was not a single idea but a system: reliable type that could be cast quickly, an ink that clung to metal, and a market of readers hungry for books. Within a few decades, workshops had spread across the continent, prices fell, and ideas began to travel faster than any courier could carry them. Every technology that followed, from the telegraph to the internet, has repeated some version of that pattern."
+    }
+  ]
+}

@@ -1,29 +1,31 @@
 """
-Synthesis service: orchestrates the full generate pipeline —
-text -> XTTS synthesis -> speed/pitch post-processing -> format conversion
--> SRT generation -> response assembly.
+Synthesis service: the full generate pipeline, shared by every engine.
+
+text -> sentence chunks -> engine synthesis per chunk -> punctuation pauses
+-> pitch -> speed -> loudness normalization -> wav/mp3 -> SRT subtitles.
 """
 
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import List
 
+import numpy as np
+
 from app.core.config import get_settings
-from app.core.exceptions import EmptyTextError, TextTooLongError
+from app.core.exceptions import EmptyTextError, GenerationError, TextTooLongError
 from app.core.logging_config import get_logger
 from app.models.schemas import (
-    AudioFormat,
     GenerateRequest,
     GenerateResponse,
     SentenceTimestamp,
 )
-from app.services.tts_engine import get_engine
+from app.services.engines import get_engine
 from app.services.voice_registry import get_voice_registry
 from app.utils import audio_processing as audio_utils
 from app.utils.file_manager import new_id
 from app.utils.subtitle_generator import write_srt
+from app.utils.text_processing import prepare_chunks
 
 logger = get_logger(__name__)
 
@@ -43,40 +45,60 @@ def generate_speech(request: GenerateRequest) -> GenerateResponse:
     settings = get_settings()
     validate_text(request.text)
 
-    registry = get_voice_registry()
-    speaker_wav = registry.reference_clip_path(request.voice_id)
+    engine_name, voice = get_voice_registry().resolve(request.voice_id)
+    engine = get_engine(engine_name.value)
 
-    engine = get_engine()
+    chunks = prepare_chunks(request.text)
+    if not chunks:
+        raise GenerationError("No speakable text remained after normalization.")
 
     start_time = time.time()
-    audio, sample_rate, timestamps = engine.synthesize(
-        text=request.text,
-        speaker_wav=speaker_wav,
-        language=request.language,
-        emotion_exaggeration=request.emotion_exaggeration,
-    )
+    engine.load()
+    synth_start = time.time()
+
+    # --- Synthesis: one engine call per chunk, with a pause after each ---
+    segments: List[np.ndarray] = []
+    pauses: List[float] = []
+    timestamps: List[SentenceTimestamp] = []
+    cursor = 0.0
+    for chunk in chunks:
+        wav = engine.synthesize_chunk(chunk.text, voice, request.language, request.emotion_exaggeration)
+        segments.append(wav)
+        pause = audio_utils.pause_for_punctuation(chunk.text)
+        pauses.append(pause)
+        duration = len(wav) / float(engine.sample_rate)
+        timestamps.append(
+            SentenceTimestamp(
+                index=chunk.index, text=chunk.text, start=round(cursor, 3), end=round(cursor + duration, 3)
+            )
+        )
+        cursor += duration + pause
+    synth_seconds = time.time() - synth_start
+
+    # Drop the pause after the last chunk so files don't end in dead air.
+    audio = audio_utils.concatenate_with_pauses(segments, engine.sample_rate, pauses[:-1])
 
     job_id = new_id()
     raw_wav_path = settings.OUTPUTS_DIR / f"{job_id}_raw.wav"
-    audio_utils.write_wav(raw_wav_path, audio, sample_rate)
+    audio_utils.write_wav(raw_wav_path, audio, engine.sample_rate)
 
     # --- Post-processing: pitch then speed (order matters: pitch via
     # asetrate also perturbs tempo internally but self-corrects, so
     # applying speed afterward gives predictable final tempo) ---
     pitch_path = settings.OUTPUTS_DIR / f"{job_id}_pitch.wav"
-    audio_utils.apply_pitch(raw_wav_path, pitch_path, request.pitch_semitones, sample_rate)
+    audio_utils.apply_pitch(raw_wav_path, pitch_path, request.pitch_semitones, engine.sample_rate)
 
     speed_path = settings.OUTPUTS_DIR / f"{job_id}_speed.wav"
     audio_utils.apply_speed(pitch_path, speed_path, request.speed)
 
     normalized_path = settings.OUTPUTS_DIR / f"{job_id}_norm.wav"
-    audio_utils.normalize_loudness(speed_path, normalized_path)
+    audio_utils.normalize_loudness(speed_path, normalized_path, engine.sample_rate)
 
     ext = request.output_format.value
     final_path = settings.OUTPUTS_DIR / f"{job_id}.{ext}"
     audio_utils.convert_format(normalized_path, final_path, ext)
 
-    # Rescale timestamps to reflect the final speed adjustment
+    # Timestamps were measured before the speed change; atempo rescales time by 1/speed.
     if abs(request.speed - 1.0) > 1e-3:
         timestamps = [
             SentenceTimestamp(
@@ -105,21 +127,25 @@ def generate_speech(request: GenerateRequest) -> GenerateResponse:
             pass
 
     processing_time = round(time.time() - start_time, 2)
+    rtf = round(synth_seconds / cursor, 3) if cursor else 0.0
 
     logger.info(
-        "Generated speech job=%s voice=%s lang=%s chars=%d duration=%.2fs processing=%.2fs",
-        job_id, request.voice_id, request.language, len(request.text), duration, processing_time,
-    )
+        "Generated job=%s engine=%s voice=%s chars=%d chunks=%d duration=%.2fs processing=%.2fs rtf=%.3f",
+        job_id, engine_name.value, request.voice_id, len(request.text), len(chunks),
+        duration, processing_time, rtf,
+    )  # fmt: skip
 
     return GenerateResponse(
         job_id=job_id,
         voice_id=request.voice_id,
+        engine=engine_name,
         language=request.language,
         duration_seconds=round(duration, 2),
         audio_url=f"/api/v1/audio/{job_id}.{ext}",
         srt_url=srt_url,
         format=request.output_format,
-        sample_rate=settings.OUTPUT_SAMPLE_RATE,
+        sample_rate=engine.sample_rate,
         sentences=timestamps,
         processing_time_seconds=processing_time,
+        real_time_factor=rtf,
     )

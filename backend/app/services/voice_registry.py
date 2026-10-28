@@ -1,10 +1,10 @@
 """
 Voice registry.
 
-Manages the built-in Male/Female preset voices (reference WAV clips used
-for XTTS speaker-conditioning) plus any user-cloned voices uploaded at
-runtime. Cloned voices are persisted as reference clips under VOICES_DIR
-so they survive process restarts.
+Lists the built-in voices of each enabled engine plus any user-cloned voices,
+and resolves a voice id to (engine, VoiceRef). Cloned voices are stored as
+reference clips under VOICES_DIR/custom with their names in
+voice_registry.json, so they survive restarts.
 """
 
 from __future__ import annotations
@@ -17,12 +17,31 @@ from typing import Dict, List, Optional
 from app.core.config import get_settings
 from app.core.exceptions import VoiceNotFoundError
 from app.core.logging_config import get_logger
-from app.models.schemas import VoiceGender, VoiceInfo
+from app.models.schemas import EngineName, VoiceGender, VoiceInfo
+from app.services.engines import VoiceRef
 from app.utils.file_manager import new_id
 
 logger = get_logger(__name__)
 
 _REGISTRY_FILE = "voice_registry.json"
+
+
+# Built-in voices. Kokoro voice ids are its voicepack names; XTTS ones map to
+# the studio speakers that ship inside the XTTS-v2 checkpoint (no files needed).
+_KOKORO_VOICES = [
+    ("af_heart", "Heart", VoiceGender.FEMALE, "en-us", "American English, warm"),
+    ("af_bella", "Bella", VoiceGender.FEMALE, "en-us", "American English, bright"),
+    ("am_michael", "Michael", VoiceGender.MALE, "en-us", "American English, even"),
+    ("am_fenrir", "Fenrir", VoiceGender.MALE, "en-us", "American English, deep"),
+    ("bf_emma", "Emma", VoiceGender.FEMALE, "en-gb", "British English"),
+    ("bm_george", "George", VoiceGender.MALE, "en-gb", "British English"),
+]
+_XTTS_SPEAKERS = [
+    ("xtts_ana", "Ana Florence", VoiceGender.FEMALE, "Multilingual studio voice"),
+    ("xtts_claribel", "Claribel Dervla", VoiceGender.FEMALE, "Multilingual studio voice"),
+    ("xtts_damien", "Damien Black", VoiceGender.MALE, "Multilingual studio voice"),
+    ("xtts_andrew", "Andrew Chipper", VoiceGender.MALE, "Multilingual studio voice"),
+]
 
 
 class VoiceRegistry:
@@ -32,46 +51,46 @@ class VoiceRegistry:
         self._custom_voices: Dict[str, VoiceInfo] = {}
         self._load_custom_voices()
 
-    # ---- Built-in presets -------------------------------------------------
+    # ---- Built-in voices --------------------------------------------------
 
     def _builtin_voices(self) -> Dict[str, VoiceInfo]:
-        return {
-            "male": VoiceInfo(
-                voice_id="male",
-                name="Male Voice",
-                gender=VoiceGender.MALE,
-                description="Default natural-sounding male narrator voice.",
-                is_custom=False,
-            ),
-            "female": VoiceInfo(
-                voice_id="female",
-                name="Female Voice",
-                gender=VoiceGender.FEMALE,
-                description="Default natural-sounding female narrator voice.",
-                is_custom=False,
-            ),
-        }
+        voices: Dict[str, VoiceInfo] = {}
+        enabled = self.settings.ENABLED_ENGINES
+        if "kokoro" in enabled:
+            for vid, name, gender, lang, desc in _KOKORO_VOICES:
+                voices[vid] = VoiceInfo(
+                    voice_id=vid, name=name, gender=gender, description=desc,
+                    engine=EngineName.KOKORO, language=lang,
+                )  # fmt: skip
+        if "xtts" in enabled:
+            for vid, name, gender, desc in _XTTS_SPEAKERS:
+                voices[vid] = VoiceInfo(
+                    voice_id=vid, name=name, gender=gender, description=desc, engine=EngineName.XTTS
+                )
+        return voices
 
-    def reference_clip_path(self, voice_id: str) -> Path:
-        """Resolve a voice_id to its reference audio clip path used for XTTS conditioning."""
-        if voice_id == "male":
-            return self.settings.VOICES_DIR / self.settings.MALE_VOICE_FILE
-        if voice_id == "female":
-            return self.settings.VOICES_DIR / self.settings.FEMALE_VOICE_FILE
-
-        info = self._custom_voices.get(voice_id)
-        if info is None:
-            raise VoiceNotFoundError(f"Voice '{voice_id}' was not found.")
+    def resolve(self, voice_id: str) -> tuple[EngineName, VoiceRef]:
+        """Which engine speaks this voice, and how (built-in speaker or cloned clip)."""
+        info = self.get_voice(voice_id)
+        if info.engine.value not in self.settings.ENABLED_ENGINES:
+            raise VoiceNotFoundError(
+                f"Voice '{voice_id}' needs the {info.engine.value} engine, which is disabled."
+            )
+        if info.engine == EngineName.KOKORO:
+            return info.engine, VoiceRef(speaker=voice_id)
+        if not info.is_custom:
+            return info.engine, VoiceRef(speaker=info.name)  # XTTS studio speaker
         path = self.settings.VOICES_DIR / "custom" / f"{voice_id}.wav"
         if not path.exists():
             raise VoiceNotFoundError(f"Reference clip for voice '{voice_id}' is missing.")
-        return path
+        return info.engine, VoiceRef(reference_wav=path)
 
     # ---- Listing ------------------------------------------------------
 
     def list_voices(self) -> List[VoiceInfo]:
         voices = list(self._builtin_voices().values())
-        voices.extend(self._custom_voices.values())
+        if "xtts" in self.settings.ENABLED_ENGINES:  # cloned voices are spoken by XTTS
+            voices.extend(self._custom_voices.values())
         return voices
 
     def get_voice(self, voice_id: str) -> VoiceInfo:
@@ -81,6 +100,9 @@ class VoiceRegistry:
         if voice_id in self._custom_voices:
             return self._custom_voices[voice_id]
         raise VoiceNotFoundError(f"Voice '{voice_id}' was not found.")
+
+    def is_builtin(self, voice_id: str) -> bool:
+        return voice_id in self._builtin_voices()
 
     # ---- Cloning --------------------------------------------------------
 
@@ -98,6 +120,7 @@ class VoiceRegistry:
             gender=VoiceGender.CUSTOM,
             description="User-cloned voice from uploaded reference audio.",
             is_custom=True,
+            engine=EngineName.XTTS,
         )
         self._custom_voices[voice_id] = info
         self._save_custom_voices()

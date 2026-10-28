@@ -1,0 +1,10 @@
+line-length = 110
+target-version = "py311"
+extend-exclude = ["env", "frontend"]
+
+[lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["B008"]  # FastAPI's File()/Form() defaults are idiomatic
+
+[lint.per-file-ignores]
+"benchmarks/report.py" = ["E501"]

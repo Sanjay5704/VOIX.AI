@@ -56,11 +56,11 @@ async def clone_voice(
 @router.delete(
     "/{voice_id}",
     summary="Delete a cloned voice",
-    description="Removes a custom cloned voice. Built-in presets (male/female) cannot be deleted.",
+    description="Removes a custom cloned voice. Built-in voices cannot be deleted.",
 )
 def delete_voice(voice_id: str) -> dict:
-    if voice_id in {"male", "female"}:
-        raise HTTPException(status_code=400, detail="Built-in voices cannot be deleted.")
     registry = get_voice_registry()
+    if registry.is_builtin(voice_id):
+        raise HTTPException(status_code=400, detail="Built-in voices cannot be deleted.")
     registry.delete_cloned_voice(voice_id)
     return {"message": f"Voice '{voice_id}' deleted."}

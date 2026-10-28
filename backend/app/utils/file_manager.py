@@ -24,14 +24,12 @@ def validate_upload(filename: str, size_bytes: int) -> None:
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
         raise UnsupportedAudioFormatError(
-            f"Unsupported audio format '{ext}'. Allowed: "
-            f"{', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}"
+            f"Unsupported audio format '{ext}'. Allowed: " f"{', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}"
         )
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
     if size_bytes > max_bytes:
         raise FileTooLargeError(
-            f"Uploaded file is {size_bytes / 1e6:.1f}MB, exceeds the "
-            f"{settings.MAX_UPLOAD_MB}MB limit."
+            f"Uploaded file is {size_bytes / 1e6:.1f}MB, exceeds the " f"{settings.MAX_UPLOAD_MB}MB limit."
         )
 
 

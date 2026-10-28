@@ -48,15 +48,16 @@ def generate_batch(request: BatchGenerateRequest) -> BatchGenerateResponse:
             succeeded += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("Batch item '%s' failed: %s", item.id, exc)
-            results.append(
-                BatchGenerateResultItem(id=item.id, success=False, error=str(exc))
-            )
+            results.append(BatchGenerateResultItem(id=item.id, success=False, error=str(exc)))
             failed += 1
 
     elapsed = round(time.time() - start, 2)
     logger.info(
         "Batch job=%s complete: %d succeeded, %d failed, %.2fs",
-        batch_id, succeeded, failed, elapsed,
+        batch_id,
+        succeeded,
+        failed,
+        elapsed,
     )
 
     return BatchGenerateResponse(

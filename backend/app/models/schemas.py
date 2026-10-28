@@ -14,6 +14,11 @@ class VoiceGender(str, Enum):
     CUSTOM = "custom"
 
 
+class EngineName(str, Enum):
+    KOKORO = "kokoro"
+    XTTS = "xtts"
+
+
 class AudioFormat(str, Enum):
     WAV = "wav"
     MP3 = "mp3"
@@ -26,6 +31,9 @@ class VoiceInfo(BaseModel):
     description: str = ""
     is_custom: bool = False
     preview_url: Optional[str] = None
+    # Older registry files have no engine field: cloned voices were always XTTS.
+    engine: EngineName = EngineName.XTTS
+    language: str = "en"
 
 
 class SentenceTimestamp(BaseModel):
@@ -37,12 +45,10 @@ class SentenceTimestamp(BaseModel):
 
 class GenerateRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Text to synthesize")
-    voice_id: str = Field(default="male", description="Voice preset id or custom voice id")
+    voice_id: str = Field(default="af_heart", description="Voice id from GET /api/v1/voices")
     language: str = Field(default="en", description="ISO language code, e.g. 'en', 'es', 'hi'")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Playback speed multiplier")
-    pitch_semitones: float = Field(
-        default=0.0, ge=-12.0, le=12.0, description="Pitch shift in semitones"
-    )
+    pitch_semitones: float = Field(default=0.0, ge=-12.0, le=12.0, description="Pitch shift in semitones")
     output_format: AudioFormat = Field(default=AudioFormat.WAV)
     generate_subtitles: bool = Field(default=True, description="Generate .srt subtitle file")
     emotion_exaggeration: float = Field(
@@ -64,7 +70,7 @@ class GenerateRequest(BaseModel):
 class BatchGenerateItem(BaseModel):
     id: str = Field(..., description="Caller-supplied identifier for this item")
     text: str = Field(..., min_length=1)
-    voice_id: str = Field(default="male")
+    voice_id: str = Field(default="af_heart")
     language: str = Field(default="en")
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     pitch_semitones: float = Field(default=0.0, ge=-12.0, le=12.0)
@@ -79,6 +85,7 @@ class BatchGenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     job_id: str
     voice_id: str
+    engine: EngineName
     language: str
     duration_seconds: float
     audio_url: str
@@ -87,6 +94,9 @@ class GenerateResponse(BaseModel):
     sample_rate: int
     sentences: List[SentenceTimestamp] = Field(default_factory=list)
     processing_time_seconds: float
+    real_time_factor: float = Field(
+        description="Synthesis time / audio length. Below 1 means faster than real time."
+    )
 
 
 class BatchGenerateResultItem(BaseModel):
@@ -120,7 +130,8 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     device: str
-    model_loaded: bool
     gpu_available: bool
     gpu_name: Optional[str] = None
+    engines: List[str]
+    loaded_engines: List[str]
     version: str

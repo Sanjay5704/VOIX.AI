@@ -41,9 +41,7 @@ def detect_device() -> DeviceInfo:
         return DeviceInfo(device="cpu", gpu_available=cuda_available)
 
     if preference == "cuda" and not cuda_available:
-        logger.warning(
-            "DEVICE_PREFERENCE=cuda but no CUDA device detected; falling back to CPU"
-        )
+        logger.warning("DEVICE_PREFERENCE=cuda but no CUDA device detected; falling back to CPU")
         return DeviceInfo(device="cpu", gpu_available=False)
 
     if not cuda_available:
@@ -56,7 +54,9 @@ def detect_device() -> DeviceInfo:
 
     logger.info(
         "CUDA device detected: %s (%.1f GB VRAM) -> using GPU, fp16=%s",
-        gpu_name, gpu_mem_gb, use_fp16,
+        gpu_name,
+        gpu_mem_gb,
+        use_fp16,
     )
 
     return DeviceInfo(

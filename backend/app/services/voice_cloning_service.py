@@ -8,12 +8,11 @@ reference clip, then registers it as a new selectable voice.
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.core.exceptions import AudioProcessingError
+from app.core.exceptions import AudioProcessingError, ValidationError
 from app.core.logging_config import get_logger
 from app.models.schemas import CloneVoiceResponse
 from app.services.voice_registry import get_voice_registry
@@ -26,10 +25,10 @@ MIN_CLIP_SECONDS = 3.0
 RECOMMENDED_MAX_SECONDS = 60.0
 
 
-def clone_voice_from_upload(
-    file_bytes: bytes, filename: str, voice_name: str
-) -> CloneVoiceResponse:
+def clone_voice_from_upload(file_bytes: bytes, filename: str, voice_name: str) -> CloneVoiceResponse:
     settings = get_settings()
+    if "xtts" not in settings.ENABLED_ENGINES:
+        raise ValidationError("Voice cloning needs the XTTS engine, which is disabled (ENABLED_ENGINES).")
     validate_upload(filename, len(file_bytes))
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,9 +66,16 @@ def _prepare_reference_clip(input_path: Path, output_path: Path) -> None:
 
     audio_utils.ensure_ffmpeg_available()
     cmd = [
-        "ffmpeg", "-y", "-i", str(input_path),
-        "-t", str(RECOMMENDED_MAX_SECONDS),
-        "-ac", "1", "-ar", "22050",
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-t",
+        str(RECOMMENDED_MAX_SECONDS),
+        "-ac",
+        "1",
+        "-ar",
+        "22050",
         str(output_path),
     ]
     try:

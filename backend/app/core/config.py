@@ -32,8 +32,8 @@ class Settings:
     """Centralized application settings."""
 
     # --- General ---
-    APP_NAME: str = os.getenv("APP_NAME", "XTTS Production TTS API")
-    APP_VERSION: str = "1.0.0"
+    APP_NAME: str = os.getenv("APP_NAME", "VOIX")
+    APP_VERSION: str = "1.1.0"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = _bool_env("DEBUG", True)
 
@@ -42,9 +42,7 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
 
     # --- CORS ---
-    CORS_ORIGINS: List[str] = _list_env(
-        "CORS_ORIGINS", ["http://localhost:3000", "http://127.0.0.1:3000"]
-    )
+    CORS_ORIGINS: List[str] = _list_env("CORS_ORIGINS", ["http://localhost:3000", "http://127.0.0.1:3000"])
 
     # --- Paths ---
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -52,22 +50,20 @@ class Settings:
     OUTPUTS_DIR: Path = Path(os.getenv("OUTPUTS_DIR", str(BASE_DIR / "outputs")))
     UPLOADS_DIR: Path = Path(os.getenv("UPLOADS_DIR", str(BASE_DIR / "uploads")))
     LOGS_DIR: Path = Path(os.getenv("LOGS_DIR", str(BASE_DIR / "logs")))
-    MODEL_CACHE_DIR: Path = Path(
-        os.getenv("MODEL_CACHE_DIR", str(BASE_DIR / "model_cache"))
-    )
+    MODEL_CACHE_DIR: Path = Path(os.getenv("MODEL_CACHE_DIR", str(BASE_DIR / "model_cache")))
 
     # --- TTS Engine ---
-    TTS_MODEL_NAME: str = os.getenv(
-        "TTS_MODEL_NAME", "tts_models/multilingual/multi-dataset/xtts_v2"
-    )
+    TTS_MODEL_NAME: str = os.getenv("TTS_MODEL_NAME", "tts_models/multilingual/multi-dataset/xtts_v2")
     # "auto" | "cuda" | "cpu"
     DEVICE_PREFERENCE: str = os.getenv("DEVICE_PREFERENCE", "auto")
     USE_FP16: bool = _bool_env("USE_FP16", True)
     DEFAULT_LANGUAGE: str = os.getenv("DEFAULT_LANGUAGE", "en")
 
-    # Default built-in voice reference clips (used as XTTS speaker conditioning)
-    MALE_VOICE_FILE: str = os.getenv("MALE_VOICE_FILE", "male_default.wav")
-    FEMALE_VOICE_FILE: str = os.getenv("FEMALE_VOICE_FILE", "female_default.wav")
+    # Which engines to offer. "kokoro" is fast and free to use; "xtts" can clone voices.
+    ENABLED_ENGINES: List[str] = _list_env("ENABLED_ENGINES", ["kokoro", "xtts"])
+    KOKORO_REPO_ID: str = os.getenv("KOKORO_REPO_ID", "hexgrad/Kokoro-82M")
+    # Voice used when a request doesn't name one (its engine is warmed up at startup).
+    DEFAULT_VOICE: str = os.getenv("DEFAULT_VOICE", "af_heart")
 
     # --- Generation limits ---
     MAX_TEXT_LENGTH: int = int(os.getenv("MAX_TEXT_LENGTH", "100000"))

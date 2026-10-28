@@ -34,5 +34,6 @@ def generate_srt(sentences: List[SentenceTimestamp]) -> str:
 
 def write_srt(sentences: List[SentenceTimestamp], output_path: Path) -> Path:
     content = generate_srt(sentences)
-    output_path.write_text(content, encoding="utf-8")
+    # newline="" stops Windows from turning line endings into CRLF (same file on every OS)
+    output_path.write_text(content, encoding="utf-8", newline="")
     return output_path

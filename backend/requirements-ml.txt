@@ -1,0 +1,8 @@
+# The TTS models. Install torch with CUDA first for GPU use:
+#   pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+-r requirements.txt
+torch>=2.4
+torchaudio>=2.4
+TTS==0.22.0           # Coqui XTTS-v2 (Coqui Public Model License: non-commercial)
+kokoro==0.9.4         # Kokoro-82M (Apache-2.0)
+misaki[en]==0.9.4

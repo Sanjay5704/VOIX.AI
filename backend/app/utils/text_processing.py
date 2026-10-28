@@ -43,6 +43,7 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
 _CLAUSE_SPLIT_RE = re.compile(r"(?<=[,;:])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
 _MULTI_PUNCT_RE = re.compile(r"([.!?]){2,}")
+_SPEAKABLE_RE = re.compile(r"\w")
 
 
 @dataclass
@@ -130,7 +131,9 @@ def prepare_chunks(text: str) -> List[TextChunk]:
     sentences = split_sentences(text)
     chunks: List[str] = []
     for sentence in sentences:
-        chunks.extend(chunk_sentence(sentence))
+        # Chunks with nothing pronounceable (e.g. "..." or "!?") make TTS models
+        # produce garbage audio, so they are skipped.
+        chunks.extend(c for c in chunk_sentence(sentence) if _SPEAKABLE_RE.search(c))
 
     return [TextChunk(index=i, text=c) for i, c in enumerate(chunks)]
 

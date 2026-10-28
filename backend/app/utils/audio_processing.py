@@ -100,9 +100,14 @@ def apply_speed(input_path: Path, output_path: Path, speed: float) -> None:
     # clamps to that range, so a single filter stage suffices.
     speed = max(0.5, min(2.0, speed))
     cmd = [
-        "ffmpeg", "-y", "-i", str(input_path),
-        "-filter:a", f"atempo={speed:.3f}",
-        "-vn", str(output_path),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-filter:a",
+        f"atempo={speed:.3f}",
+        "-vn",
+        str(output_path),
     ]
     _run_ffmpeg(cmd, "speed adjustment")
 
@@ -134,9 +139,14 @@ def apply_pitch(input_path: Path, output_path: Path, semitones: float, sample_ra
         filter_chain += "," + ",".join(tempo_filters)
 
     cmd = [
-        "ffmpeg", "-y", "-i", str(input_path),
-        "-filter:a", filter_chain,
-        "-vn", str(output_path),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-filter:a",
+        filter_chain,
+        "-vn",
+        str(output_path),
     ]
     _run_ffmpeg(cmd, "pitch adjustment")
 
@@ -168,8 +178,14 @@ def convert_format(input_path: Path, output_path: Path, fmt: str) -> None:
 
     if fmt == "mp3":
         cmd = [
-            "ffmpeg", "-y", "-i", str(input_path),
-            "-codec:a", "libmp3lame", "-qscale:a", "2",
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-codec:a",
+            "libmp3lame",
+            "-qscale:a",
+            "2",
             str(output_path),
         ]
         _run_ffmpeg(cmd, "MP3 conversion")
@@ -178,22 +194,38 @@ def convert_format(input_path: Path, output_path: Path, fmt: str) -> None:
     raise AudioProcessingError(f"Unsupported output format: {fmt}")
 
 
-def normalize_loudness(input_path: Path, output_path: Path) -> None:
-    """Apply EBU R128 loudness normalization for consistent playback volume."""
+def normalize_loudness(input_path: Path, output_path: Path, sample_rate: int | None = None) -> None:
+    """Apply EBU R128 loudness normalization for consistent playback volume.
+
+    loudnorm upsamples to 192 kHz internally, so the output rate is pinned back
+    to `sample_rate` (otherwise WAV files come out 8x bigger than needed).
+    """
     ensure_ffmpeg_available()
     cmd = [
-        "ffmpeg", "-y", "-i", str(input_path),
-        "-filter:a", "loudnorm=I=-16:TP=-1.5:LRA=11",
-        str(output_path),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-filter:a",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
     ]
+    if sample_rate:
+        cmd += ["-ar", str(sample_rate)]
+    cmd.append(str(output_path))
     _run_ffmpeg(cmd, "loudness normalization")
 
 
 def get_duration_seconds(path: Path) -> float:
     ensure_ffmpeg_available()
     cmd = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
@@ -204,9 +236,7 @@ def get_duration_seconds(path: Path) -> float:
 
 def _run_ffmpeg(cmd: List[str], operation: str) -> None:
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, check=False
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         if result.returncode != 0:
             logger.error("ffmpeg %s failed: %s", operation, result.stderr[-2000:])
             raise AudioProcessingError(
