@@ -4,9 +4,9 @@ Paste a script → pick or clone a voice → get a voiceover with SRT subtitles,
 plus job history. The same engine is exposed as a REST API with API keys,
 quotas and usage metering.
 
-> **Status:** Phase 1 (control plane, queue, GPU worker) is done. The React
-> dashboard is being rebuilt against the new API (Phase 2); until then use the
-> Swagger UI at `/docs`. See [docs/RUNNING.md](docs/RUNNING.md) to run it.
+> **Status:** control plane, queue, GPU worker (Phase 1) and the React dashboard
+> (Phase 2) are done; benchmarks/analytics and CI/deploy are next.
+> See [docs/RUNNING.md](docs/RUNNING.md) to run it.
 
 ## Architecture (short version)
 
@@ -35,6 +35,7 @@ quotas and usage metering.
 ```
 api/        FastAPI control plane, SQLAlchemy 2.0 models, Alembic migrations, tests
 worker/     GPU worker: engines, synthesis pipeline (chunking, pauses, pitch, speed, loudnorm, SRT)
+frontend/   React dashboard: studio, history, voice library + consent flow, API keys, usage
 tests_e2e/  API + queue + worker in one process with the mock engine
 scripts/    legacy voice import
 docs/       RUNNING.md (how to run), MEASUREMENTS.md (real benchmark numbers)

@@ -69,7 +69,20 @@ The first XTTS job downloads the model (~1.8 GB) into the Coqui cache and you
 must accept the Coqui Public Model License (non-commercial). The worker sets
 `COQUI_TOS_AGREED=1` for non-interactive runs, which means *you* are agreeing to it.
 
-## 3. Try it with curl (PowerShell)
+## 3. Dashboard
+
+```powershell
+cd frontend
+npm ci          # once
+npm run dev     # http://localhost:5173  (proxies /v1 to the API on :8000)
+```
+
+Register an account, then use Studio → render. The **On air** lamp in the top
+bar shows whether a GPU worker is connected; with the worker off, renders queue
+and start automatically when it comes back. Production build: `npm run build`
+(set `VITE_API_BASE_URL` if the API is on a different origin).
+
+## 4. Try it with curl (PowerShell)
 
 ```powershell
 $base = "http://localhost:8000"
@@ -90,7 +103,7 @@ Invoke-WebRequest "$base/v1/jobs/$($job.id)/subtitles" -Headers $h -OutFile voix
 Developer API keys: `POST /v1/api-keys` (shown once), then send `X-API-Key: vx_live_...`
 instead of the Bearer header.
 
-## 4. Re-import voices from the old app
+## 5. Re-import voices from the old app
 
 The pre-SaaS app's cloned voices in `backend\voices\custom\` can be uploaded to
 your account (consent-gated and audit-logged like any clone; files on disk are
@@ -100,7 +113,7 @@ not modified). Needs a running worker with a cloning engine to prepare them.
 api\.venv\Scripts\python scripts\import_legacy_voices.py --email me@example.com --i-have-consent
 ```
 
-## 5. Tests
+## 6. Tests
 
 ```powershell
 # API (SQLite)
@@ -117,6 +130,9 @@ cd worker; ..\env\Scripts\python -m pytest -p no:asyncio; cd ..
 # End to end: API + queue + worker (mock engine) in one process
 api\.venv\Scripts\python -m pip install -r worker\requirements.txt   # once
 api\.venv\Scripts\python -m pytest tests_e2e
+
+# Frontend production build
+cd frontend; npm run build; cd ..
 
 # Lint / format
 api\.venv\Scripts\ruff check api worker tests_e2e scripts
