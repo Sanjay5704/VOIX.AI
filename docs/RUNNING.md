@@ -120,7 +120,8 @@ api\.venv\Scripts\python scripts\import_legacy_voices.py --email me@example.com 
 .\env\Scripts\python -m benchmarks.run_benchmark --engines kokoro,xtts --repeats 3
 
 # Publish the latest run to a running API (shows on the Benchmarks page and /v1/engines)
-.\env\Scripts\python -m benchmarks.run_benchmark --upload-file benchmarksesults\<file>.json
+.\env\Scripts\python -m benchmarks.run_benchmark --upload-file benchmarks
+esults\<file>.json
 
 # Grant yourself access to the Analytics page
 cd api; .\.venv\Scripts\python -m voix_api.admin promote me@example.com; cd ..
@@ -141,7 +142,8 @@ quality check. See [ANALYTICS.md](ANALYTICS.md) for the data models.
 # API (SQLite)
 cd api; .\.venv\Scripts\python -m pytest; cd ..
 
-# API against Postgres (runs the Alembic migrations + concurrent SKIP LOCKED claims)
+# API against Postgres (runs the Alembic migrations + concurrent SKIP LOCKED claims).
+# No Docker? `pip install pgserver` in a separate venv gives an embedded Postgres; use its URI.
 $env:TEST_DATABASE_URL = "postgresql+psycopg://voix:voix@localhost:5433/voix_test"
 cd api; .\.venv\Scripts\python -m pytest; cd ..
 Remove-Item Env:TEST_DATABASE_URL
