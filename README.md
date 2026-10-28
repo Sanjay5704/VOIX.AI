@@ -1,69 +1,153 @@
 # VOIX — AI voiceover studio + developer TTS API
 
-Paste a script → pick or clone a voice → get a voiceover with SRT subtitles,
-plus job history. The same engine is exposed as a REST API with API keys,
-quotas and usage metering.
+[![CI](https://github.com/Sanjay5704/VOIX.AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Sanjay5704/VOIX.AI/actions/workflows/ci.yml)
 
-> **Status:** control plane, queue and GPU worker; React dashboard; engine
-> benchmarks and analytics are done. CI and free-tier deployment are next.
-> See [docs/RUNNING.md](docs/RUNNING.md) to run it.
+Paste a script → pick or clone a voice → get a voiceover with SRT subtitles.
+The same engine is a REST API with API keys, quotas and usage metering.
+Rendering happens on a GPU worker that **pulls** jobs from the cloud API, so a
+laptop behind home Wi-Fi can serve a hosted product.
 
-## Architecture (short version)
+![Studio: script, voice and controls, with a finished render](docs/screenshots/studio.png)
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Clients
+        UI[React dashboard]
+        DEV[Developer code<br/>X-API-Key]
+    end
+    subgraph Cloud["Control plane (free tier)"]
+        API[FastAPI API<br/>auth · quotas · rate limits<br/>idempotency · /metrics]
+        PG[(Postgres<br/>jobs table = queue<br/>usage · audit · analytics views)]
+        S3[(Object storage<br/>R2 / local)]
+    end
+    subgraph Laptop["GPU worker (RTX 4070 laptop)"]
+        W[voix_worker<br/>Kokoro-82M · XTTS-v2]
+    end
+    UI -- JWT --> API
+    DEV --> API
+    API <--> PG
+    API <--> S3
+    W -- "claim · heartbeat · complete<br/>(outbound HTTPS only)" --> API
 ```
- browser / API client ──HTTPS──▶  FastAPI control plane  ──▶  Postgres  (users, keys, voices, jobs = queue, usage, audit)
-                                        │      ▲                └──▶  object storage (local disk or S3/R2)
-                                        │      │ claim / heartbeat / complete   (outbound HTTPS only)
-                                        ▼      │
-                                   GPU worker on a laptop (XTTS-v2 / Kokoro / mock)
-```
 
-- **Async jobs.** `POST /v1/jobs/tts` returns `202` at once. Rendering happens on a worker.
-- **Pull-based worker.** The worker makes only outbound requests, so it works behind home NAT.
-  While it is off, jobs stay `queued` and `/v1/health` reports the worker offline.
-- **Queue in Postgres, no Redis.** Claims use `SELECT … FOR UPDATE SKIP LOCKED`. Jobs carry
-  leases that worker heartbeats extend; expired leases are reaped lazily (requeue until
-  `max_attempts`, then fail). Retries back off exponentially. Cancellation is cooperative.
-- **Auth.** JWT for the dashboard, `vx_live_…` API keys (stored as sha256) for developers.
-  Workers use a separate token.
-- **Limits.** Monthly character quotas per plan and per-user rate limits. Both are computed from
-  the database, so they hold across API instances. `Idempotency-Key` makes retries safe.
-- **Voice cloning is consent-gated.** Uploads require an explicit consent statement, which is
-  stored with the voice and written to an audit log.
-- **Separate packages.** `api/` has no torch dependency; `worker/` has no SQLAlchemy dependency.
+1. `POST /v1/jobs/tts` validates, checks quota + rate limit, inserts a `queued` job → `202`.
+2. The worker long-polls `/internal/jobs/claim`. The API takes the next job with
+   `SELECT … FOR UPDATE SKIP LOCKED` and leases it to that worker.
+3. The worker chunks the text, synthesises each chunk, adds punctuation pauses,
+   applies pitch/speed/loudness with ffmpeg, writes MP3/WAV + SRT, and heartbeats
+   to extend the lease and report progress.
+4. It uploads the files; the API stores them and records usage. The dashboard
+   polls the job and plays the result.
 
-```
-api/        FastAPI control plane, SQLAlchemy 2.0 models, Alembic migrations, tests
-worker/     GPU worker: engines, synthesis pipeline (chunking, pauses, pitch, speed, loudnorm, SRT)
-frontend/   React dashboard: studio, history, voice library + consent flow, API keys, usage
-tests_e2e/  API + queue + worker in one process with the mock engine
-benchmarks/ multi-engine benchmark: latency, RTF, VRAM, Whisper round-trip WER/CER
-scripts/    legacy voice import, load generator
-docs/       RUNNING.md, BENCHMARK.md (generated), ANALYTICS.md, MEASUREMENTS.md
-```
+If the laptop is off, jobs wait in the queue and `/v1/health` reports the worker offline.
+If it dies mid-job, the lease expires and the job is retried (then failed after `max_attempts`).
 
 ## Measured on an RTX 4070 Laptop GPU
 
-From [docs/BENCHMARK.md](docs/BENCHMARK.md) (6 scripts × 3 repeats, Whisper round-trip):
+From [docs/BENCHMARK.md](docs/BENCHMARK.md): 6 scripts × 3 repeats through the
+production pipeline, each render transcribed by Whisper and scored against its script.
 
-| Engine | Throughput | WER | Peak VRAM |
-|---|---:|---:|---:|
-| Kokoro-82M | 14.4× real time | 0.4% | 747 MB |
-| XTTS-v2 | 1.5× real time | 2.3% | 2,028 MB |
+| Engine | Throughput | Word error rate | Peak VRAM | Licence |
+|---|---:|---:|---:|---|
+| Kokoro-82M | **14.4× real time** | **0.4%** | **747 MB** | Apache-2.0 |
+| XTTS-v2 | 1.5× real time | 2.3% | 2,028 MB | non-commercial |
+
+XTTS latency also varied widely for identical input (5.2–25.2 s for one script),
+while Kokoro's repeats agreed within a few percent. Real-load results and other
+measurements are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
+
+| Benchmarks | Analytics (operators) |
+|---|---|
+| ![Benchmarks page](docs/screenshots/benchmarks.png) | ![Analytics page](docs/screenshots/analytics.png) |
+
+## Features
+
+- **Studio:** script editor with live character limits, voice picker grouped by
+  engine with licence labels, speed/pitch/expressiveness, MP3/WAV, SRT, live job
+  status, player with the real waveform and clickable subtitle cues.
+- **Voice cloning with consent:** two-step upload; the consent statement, time and
+  IP are stored with the voice and written to an audit log. Clips are standardised
+  by the worker (mono 22.05 kHz, 3–60 s).
+- **Developer API:** `vx_live_…` keys (stored as SHA-256, shown once),
+  `Idempotency-Key` replay/conflict handling, keyset pagination, authorised
+  downloads (local streaming or presigned R2 redirects). OpenAPI docs at `/docs`.
+- **Limits:** monthly character quotas per plan and per-user rate limits,
+  computed from the database under a row lock, so they hold across API instances.
+- **Benchmarks:** `/v1/engines` and the Benchmarks page show measured speed,
+  WER, VRAM and load time from the latest uploaded run.
+- **Analytics:** dbt-style SQL models (`stg_jobs → fct_engine_daily,
+  fct_daily_activity`) that run on Postgres and SQLite: DAU, volume, failure
+  rate, p50/p95 render time and queue wait per engine. See [docs/ANALYTICS.md](docs/ANALYTICS.md).
+- **Operations:** JSON logs with request IDs, Prometheus `/metrics` (HTTP, jobs,
+  queue depth, workers online), security headers + CSP, graceful worker shutdown
+  that hands the job back without spending a retry.
+
+## Design decisions and trade-offs
+
+| Decision | Why | Trade-off |
+|---|---|---|
+| Postgres as the queue (`SKIP LOCKED` + leases), no Redis | One stateful service on a free tier; jobs and their state change in one transaction. | Polling instead of push; fine at this scale, not for thousands of jobs/s. |
+| Pull-based worker over HTTPS | Works behind NAT with no tunnel or open port; the API never needs to reach the GPU. | Up to one poll interval of extra latency (long-poll keeps it small). |
+| Lazy lease reaping on claim/health | No scheduler process to run or pay for. | A dead worker's job is only requeued when someone polls (the worker or health check). |
+| Quotas and rate limits from the `jobs` table | Correct across API instances without Redis. | An extra indexed query per job creation. |
+| Separate `api/` and `worker/` packages | API image stays small (no torch); worker has no database access or credentials. | The JSON contract is duplicated; the e2e test guards it. |
+| Kokoro as the default engine | Apache-2.0, ~10× XTTS throughput, a third of the VRAM. | No cloning; XTTS is kept for that and labelled non-commercial. |
+| Analytics as SQL views in the app DB | Always fresh, no pipeline to schedule, same models in tests. | Heavier queries share the OLTP database; a warehouse would come first at scale. |
+| One worker processes jobs in order | Simple and predictable. | **Head-of-line blocking** seen in real load: fast Kokoro jobs waited a median 34 s behind slow XTTS jobs. Next step: a worker per engine, or claiming fast-engine jobs first. |
+
+## Run it
+
+Windows PowerShell commands are in [docs/RUNNING.md](docs/RUNNING.md) (API, GPU worker,
+dashboard, tests). Free-tier deployment (Render + Neon + Cloudflare R2 + Cloudflare Pages
++ laptop worker) is in [docs/DEPLOY.md](docs/DEPLOY.md).
+
+```
+api/        FastAPI control plane, SQLAlchemy 2.0 models, Alembic migrations, analytics models, tests
+worker/     GPU worker: engines (Kokoro, XTTS, mock), synthesis pipeline, lease-keeping runner
+frontend/   React dashboard (studio, history, voices, API keys, usage, benchmarks, analytics)
+benchmarks/ multi-engine benchmark: latency, RTF, VRAM, Whisper round-trip WER/CER
+tests_e2e/  API + queue + worker in one process with the mock engine
+scripts/    load generator, legacy voice import
+docs/       RUNNING, DEPLOY, BENCHMARK (generated), ANALYTICS, MEASUREMENTS
+```
+
+## Testing and CI
+
+81 automated tests: 47 API, 27 worker, 3 end-to-end, 4 benchmark-metric. GitHub
+Actions runs ruff, the API suite on **SQLite and Postgres 16** (including Alembic
+upgrade → check → downgrade → upgrade and a 6-thread concurrent-claim test), worker
+tests with ffmpeg, the end-to-end suite with the mock engine, the frontend build,
+and Docker image builds. The mock engine lets the whole pipeline run on CPU in CI.
 
 ## Engines and licences
 
-| Engine | Licence | Commercial use | Cloning | Role |
-|---|---|---|---|---|
-| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | Apache-2.0 (weights) | Yes | No, fixed voicepacks | Default engine |
-| [Coqui XTTS-v2](https://huggingface.co/coqui/XTTS-v2) | Coqui Public Model License 1.0 | **No** (non-commercial only) | Yes, 3–60 s reference | Cloning / demo |
-| Mock | Project code | Yes | Yes (ignored) | Tests and CI |
+| Engine | Licence | Commercial use | Cloning |
+|---|---|---|---|
+| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | Apache-2.0 (weights) | Yes | No, fixed voicepacks |
+| [Coqui XTTS-v2](https://huggingface.co/coqui/XTTS-v2) | Coqui Public Model License 1.0 | **No** | Yes, 3–60 s reference |
+| Mock | project code | Yes | Yes (ignored) |
 
-Coqui (the company) has shut down, so a commercial XTTS licence can no longer be
-obtained. Any deployment that charges users must disable XTTS
-(`ENABLED_ENGINES=kokoro`). This project is a portfolio demo and does not charge anyone.
+Coqui has shut down, so a commercial XTTS licence can no longer be obtained. A
+deployment that charges users must run `ENABLED_ENGINES=kokoro`. This project is a
+portfolio demo and charges no one. Only clone voices you have permission to use.
 
-Only clone voices you have explicit permission to use.
+## Resume bullets
+
+- Built **VOIX**, a text-to-speech SaaS (FastAPI, PostgreSQL, React) with a
+  Postgres-backed job queue (`SKIP LOCKED` leases, heartbeats, retries with
+  back-off, cancellation) and a pull-based GPU worker that serves a hosted API
+  from a laptop behind NAT; 81 automated tests, CI on SQLite and Postgres.
+- Benchmarked two TTS models on an RTX 4070 with a Whisper round-trip quality
+  check: Kokoro-82M ran at **14.4× real time with 0.4% WER and 747 MB VRAM** vs
+  XTTS-v2 at 1.5×, 2.3% and 2.0 GB, and made the Apache-2.0 model the default.
+- Modelled job and usage data into dbt-style SQL marts portable across Postgres
+  and SQLite (DAU, failure rate, p50/p95 latency and queue wait); real-load analysis
+  found head-of-line blocking (**34 s median queue wait for sub-second jobs**).
+- Implemented production basics: JWT plus hashed API keys, idempotency keys,
+  database-enforced quotas and rate limits, consent-audited voice cloning,
+  Prometheus metrics, and JSON logs with request IDs.
 
 ## Licence
 
