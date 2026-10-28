@@ -8,20 +8,21 @@ export default function Header({ health }) {
       : "CPU"
     : "Checking…";
 
-  const statusTone = health ? (health.model_loaded ? "ready" : "loading") : "unknown";
+  const ready = health && health.loaded_engines.length > 0;
+  const statusTone = health ? (ready ? "ready" : "loading") : "unknown";
 
   return (
     <header className="header">
       <div className="header__brand">
         <Waveform active bars={14} variant="compact" />
-        <span className="header__wordmark">NaturalSpeech</span>
+        <span className="header__wordmark">VOIX</span>
       </div>
       <div className="header__meta">
         <span className={`status-pill status-pill--${statusTone}`}>
           <span className="status-pill__dot" />
           {health
-            ? health.model_loaded
-              ? "Model ready"
+            ? ready
+              ? `Ready · ${health.loaded_engines.join(" + ")}`
               : "Warming up"
             : "Connecting"}
         </span>

@@ -27,6 +27,7 @@ export default function AudioPlayer({ result }) {
   if (!result) return null;
 
   const { audioUrl, srtUrl, duration_seconds, sentences, format } = result;
+  const { engine, processing_time_seconds: took, real_time_factor: rtf } = result;
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -91,6 +92,10 @@ export default function AudioPlayer({ result }) {
           {formatTime(duration_seconds)}
         </div>
       </div>
+
+      <p className="player__stats">
+        {engine} · made in {took}s{rtf > 0 && ` · ${(1 / rtf).toFixed(1)}× faster than real time`}
+      </p>
 
       <div className="player__actions">
         <a

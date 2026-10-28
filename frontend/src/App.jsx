@@ -19,12 +19,13 @@ export default function App() {
   const { isGenerating, result, error, generate, reset } = useSpeechGeneration();
 
   const [text, setText] = useState(
-    "Welcome to NaturalSpeech. Type anything you like, choose a voice, and press generate — pauses, emphasis, and rhythm follow your punctuation automatically."
+    "Welcome to VOIX. Type anything you like, choose a voice, and press generate — pauses, emphasis, and rhythm follow your punctuation automatically."
   );
-  const [voiceId, setVoiceId] = useState("male");
+  const [voiceId, setVoiceId] = useState("af_heart");
   const [speed, setSpeed] = useState(1.0);
   const [pitch, setPitch] = useState(0.0);
   const [emotion, setEmotion] = useState(1.0);
+  const selectedVoice = voices.find((v) => v.voice_id === voiceId);
   const [language, setLanguage] = useState("en");
   const [format, setFormat] = useState("wav");
   const [generateSubtitles, setGenerateSubtitles] = useState(true);
@@ -87,8 +88,8 @@ export default function App() {
           <Waveform active={isGenerating} bars={80} />
           <h1 className="hero__title">Speech that sounds like someone, not something.</h1>
           <p className="hero__subtitle">
-            Open-source XTTS-v2 synthesis running locally — natural pacing,
-            real punctuation handling, and a voice you can clone in seconds.
+            Local text-to-speech on your own GPU: fast Kokoro voices, or clone a
+            voice with XTTS-v2. Natural pacing, real punctuation handling, subtitles.
           </p>
         </section>
 
@@ -114,6 +115,7 @@ export default function App() {
               onPitchChange={setPitch}
               emotion={emotion}
               onEmotionChange={setEmotion}
+              emotionDisabled={selectedVoice?.engine !== "xtts"}
               disabled={isGenerating}
             />
 
@@ -148,7 +150,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <span>NaturalSpeech · powered by Coqui XTTS-v2 · runs locally</span>
+        <span>VOIX · Kokoro-82M + Coqui XTTS-v2 · runs locally</span>
       </footer>
 
       <CloneVoiceModal

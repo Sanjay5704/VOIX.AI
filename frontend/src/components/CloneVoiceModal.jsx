@@ -6,6 +6,7 @@ export default function CloneVoiceModal({ open, onClose, onCloned }) {
   const [name, setName] = useState("");
   const [status, setStatus] = useState("idle"); // idle | uploading | error
   const [error, setError] = useState(null);
+  const [consent, setConsent] = useState(false);
 
   if (!open) return null;
 
@@ -66,6 +67,11 @@ export default function CloneVoiceModal({ open, onClose, onCloned }) {
             {file && <span className="field__hint">{file.name}</span>}
           </label>
 
+          <label className="field field--inline">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            <span>This is my voice, or I have the speaker&apos;s permission to clone it.</span>
+          </label>
+
           {error && <p className="form-error">{error.message}</p>}
 
           <div className="modal__footer">
@@ -75,7 +81,7 @@ export default function CloneVoiceModal({ open, onClose, onCloned }) {
             <button
               type="submit"
               className="button button--primary"
-              disabled={status === "uploading"}
+              disabled={status === "uploading" || !consent || !file}
             >
               {status === "uploading" ? "Cloning…" : "Clone voice"}
             </button>

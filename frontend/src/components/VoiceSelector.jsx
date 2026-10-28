@@ -6,6 +6,30 @@ const GENDER_COLOR = {
   custom: "var(--signal-violet)",
 };
 
+const GROUPS = [
+  { engine: "kokoro", title: "Fast voices", note: "Kokoro-82M · Apache-2.0" },
+  { engine: "xtts", title: "Cloning voices", note: "XTTS-v2 · non-commercial licence · slower" },
+];
+
+function VoiceCard({ voice, selected, onSelect, disabled }) {
+  return (
+    <button
+      type="button"
+      className={`voice-card ${selected ? "voice-card--selected" : ""}`}
+      onClick={() => onSelect(voice.voice_id)}
+      disabled={disabled}
+      style={{ "--accent": GENDER_COLOR[voice.gender] || "var(--signal-blue)" }}
+    >
+      <span className="voice-card__avatar">{voice.name.trim().charAt(0).toUpperCase()}</span>
+      <span className="voice-card__info">
+        <span className="voice-card__name">{voice.name}</span>
+        <span className="voice-card__desc">{voice.description}</span>
+      </span>
+      {voice.is_custom && <span className="voice-card__badge">Custom</span>}
+    </button>
+  );
+}
+
 export default function VoiceSelector({ voices, selectedId, onSelect, disabled, onOpenClone }) {
   return (
     <div className="field">
@@ -20,33 +44,29 @@ export default function VoiceSelector({ voices, selectedId, onSelect, disabled, 
           + Clone a voice
         </button>
       </div>
-      <div className="voice-grid">
-        {voices.map((voice) => {
-          const isSelected = voice.voice_id === selectedId;
-          return (
-            <button
-              key={voice.voice_id}
-              type="button"
-              className={`voice-card ${isSelected ? "voice-card--selected" : ""}`}
-              onClick={() => onSelect(voice.voice_id)}
-              disabled={disabled}
-              style={{ "--accent": GENDER_COLOR[voice.gender] || "var(--signal-blue)" }}
-            >
-              <span className="voice-card__avatar">
-                {voice.name.trim().charAt(0).toUpperCase()}
-              </span>
-              <span className="voice-card__info">
-                <span className="voice-card__name">{voice.name}</span>
-                <span className="voice-card__desc">{voice.description}</span>
-              </span>
-              {voice.is_custom && <span className="voice-card__badge">Custom</span>}
-            </button>
-          );
-        })}
-        {voices.length === 0 && (
-          <p className="voice-grid__empty">No voices available yet.</p>
-        )}
-      </div>
+      {GROUPS.map(({ engine, title, note }) => {
+        const list = voices.filter((v) => v.engine === engine);
+        if (list.length === 0) return null;
+        return (
+          <div key={engine} className="voice-group">
+            <p className="voice-group__title">
+              {title} <span className="voice-group__note">{note}</span>
+            </p>
+            <div className="voice-grid">
+              {list.map((voice) => (
+                <VoiceCard
+                  key={voice.voice_id}
+                  voice={voice}
+                  selected={voice.voice_id === selectedId}
+                  onSelect={onSelect}
+                  disabled={disabled}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {voices.length === 0 && <p className="voice-grid__empty">No voices available yet.</p>}
     </div>
   );
 }

@@ -8,6 +8,7 @@ export default function ControlSliders({
   emotion,
   onEmotionChange,
   disabled,
+  emotionDisabled,
 }) {
   return (
     <div className="controls-grid">
@@ -37,9 +38,11 @@ export default function ControlSliders({
         min={0.4}
         max={1.6}
         step={0.05}
-        format={(v) => (v < 0.85 ? "Calm" : v > 1.15 ? "Animated" : "Natural")}
+        format={(v) =>
+          emotionDisabled ? "XTTS only" : v < 0.85 ? "Calm" : v > 1.15 ? "Animated" : "Natural"
+        }
         onChange={onEmotionChange}
-        disabled={disabled}
+        disabled={disabled || emotionDisabled}
       />
     </div>
   );
